@@ -2,3 +2,4 @@
 node_modules/
 *.log
 .claude/
+knot-telemetry*.json
