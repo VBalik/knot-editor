@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редактор топологических узлов · 3D-релаксация</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --line:#2a313c; --txt:#d6deeb;
+    --muted:#8b97a8; --accent:#5ad1c7; --accent2:#f5a623; --over:#4ade80; --under:#f87171;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;overflow:hidden}
+  #app{display:flex;height:100%}
+  .pane{display:flex;flex-direction:column;min-width:0}
+  #left{flex:0 0 46%;border-right:1px solid var(--line)}
+  #right{flex:1 1 54%;position:relative}
+  .head{padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .head h1{font-size:13px;margin:0;font-weight:600;letter-spacing:.2px}
+  .head .hint{color:var(--muted);font-size:12px}
+  /* ---- единый верхний тулбар (одинаковый стиль в обоих окнах) ---- */
+  .topbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+    padding:9px 15px;min-height:56px;
+    background:linear-gradient(180deg,#1b222e,#141922);
+    border-bottom:1px solid var(--line);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.03), 0 10px 20px -16px #000}
+  .step{display:flex;align-items:center;gap:10px;white-space:nowrap;margin-right:3px}
+  .step .num{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;
+    font-size:13px;font-weight:700;color:#06231f;
+    background:linear-gradient(180deg,#74e2d8,#37bcb2);
+    box-shadow:0 2px 8px -1px rgba(90,209,199,.55)}
+  .step .ttl{font-size:13.5px;font-weight:650;letter-spacing:.2px}
+  .tsep{width:1px;height:26px;background:var(--line);flex:none;margin:0 3px}
+  .tspacer{flex:1 1 10px}
+  .tlabel{font-size:12px;color:var(--muted);white-space:nowrap}
+  .chip{display:inline-flex;align-items:center;gap:9px;height:37px;padding:0 12px;
+    background:rgba(255,255,255,.035);border:1px solid var(--line);border-radius:10px;
+    font-size:12px;color:var(--muted);white-space:nowrap;transition:border-color .12s,background .12s}
+  .chip:hover{border-color:#3a4554;background:rgba(255,255,255,.05)}
+  .chip b{color:var(--accent);font-weight:600;font-variant-numeric:tabular-nums;min-width:26px;text-align:right}
+  .chip input[type=range]{width:84px}
+  .chip input[type=color]{width:30px;height:22px}
+  .seg{display:inline-flex;height:37px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .seg button{height:100%;border:none;border-left:1px solid var(--line);border-radius:0;
+    background:#1e2632;padding:0 13px;font-weight:600;min-width:44px;justify-content:center}
+  .seg button:first-child{border-left:none}
+  .seg button:hover{background:#2b3543}
+  .hint{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40ch}
+  .statuspill{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 13px;
+    background:rgba(255,255,255,.035);border:1px solid var(--line);border-radius:999px;
+    font-size:12px;color:var(--muted);white-space:nowrap}
+  .statuspill .dot{width:7px;height:7px;border-radius:50%;background:#556173;flex:none;transition:background .2s}
+  .statuspill.run{color:var(--txt)}
+  .statuspill.run .dot{background:var(--accent2);animation:pulse 1.1s infinite}
+  .statuspill.done .dot{background:var(--accent)}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(245,166,35,.55)}70%{box-shadow:0 0 0 6px rgba(245,166,35,0)}100%{box-shadow:0 0 0 0 rgba(245,166,35,0)}}
+  .stagewrap{flex:1;position:relative;min-height:0}
+  #draw{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;
+    background:
+      radial-gradient(circle at 30% 20%,#1b2230,#0e1116 70%);
+    touch-action:none}
+  #gl{position:absolute;inset:0;display:block}
+  .toolbar{padding:10px 14px;border-top:1px solid var(--line);background:var(--panel);
+    display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  button{background:#232b38;color:var(--txt);border:1px solid var(--line);
+    height:37px;padding:0 15px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:550;
+    display:inline-flex;align-items:center;gap:6px;
+    transition:background .12s,border-color .12s,transform .05s,filter .12s}
+  button:hover{background:#2b3543;border-color:#3a4554}
+  button:active{transform:translateY(1px)}
+  button.primary{background:var(--accent);color:#06231f;border-color:var(--accent);font-weight:600}
+  button.primary:hover{background:#74e0d6}
+  button.go{background:linear-gradient(180deg,#f8b44e,#ef971a);color:#2a1c00;
+    border-color:#e08e12;font-weight:700;box-shadow:0 3px 11px -3px rgba(245,166,35,.6)}
+  button.go:hover{filter:brightness(1.06);background:linear-gradient(180deg,#ffbe5c,#f5a123)}
+  button.ghost{background:transparent;color:var(--muted)}
+  button.ghost:hover{background:rgba(255,255,255,.055);color:var(--txt)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .ctrls{position:absolute;top:12px;right:12px;width:210px;background:rgba(20,25,33,.92);
+    border:1px solid var(--line);border-radius:12px;padding:12px 14px;backdrop-filter:blur(6px);
+    box-shadow:0 8px 28px rgba(0,0,0,.45)}
+  .ctrls h2{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);
+    margin:0 0 8px}
+  .row{margin:9px 0}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .row label{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:3px}
+  .row label b{color:var(--accent);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  input[type=color]{width:34px;height:24px;border:1px solid var(--line);border-radius:6px;
+    background:none;padding:0;cursor:pointer;vertical-align:middle}
+  .prow{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:5px}
+  input[type=number]{width:52px;background:#222a36;color:var(--txt);border:1px solid var(--line);
+    border-radius:6px;padding:3px 6px;font-size:13px;font-variant-numeric:tabular-nums;text-align:center}
+  input[type=number]:focus{outline:none;border-color:var(--accent)}
+  .crow{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+  .legend{position:absolute;bottom:12px;left:12px;font-size:12px;color:var(--muted);
+    background:rgba(20,25,33,.8);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+  .legend .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin:0 4px 0 2px;vertical-align:baseline}
+  .badge{font-size:12px;color:var(--muted)}
+  .badge b{color:var(--accent)}
+  .status{position:absolute;bottom:12px;right:12px;font-size:12px;color:var(--muted);
+    background:rgba(20,25,33,.8);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ================= LEFT: 2D drawing ================= -->
+  <div id="left" class="pane">
+    <div class="topbar">
+      <span class="step"><span class="num">1</span><span class="ttl">Узел</span></span>
+      <button id="clear" class="ghost">Очистить</button>
+      <span class="tsep"></span>
+      <span class="tlabel">Примеры</span>
+      <span class="seg">
+        <button class="ex" data-knot="trefoil" title="Трилистник 3₁">3₁</button>
+        <button class="ex" data-knot="figure8" title="Восьмёрка 4₁">4₁</button>
+        <button class="ex" data-knot="cinquefoil" title="Пятилистник 5₁">5₁</button>
+        <button class="ex" data-knot="septafoil" title="Семилистник 7₁">7₁</button>
+      </span>
+      <span class="chip" id="crossInfo">пересечений <b>0</b></span>
+      <span class="tspacer"></span>
+      <span class="hint" id="hint">Ведите мышью, вернитесь в старт · кликайте пересечения — над/под</span>
+    </div>
+    <div class="stagewrap">
+      <canvas id="draw"></canvas>
+    </div>
+  </div>
+
+  <!-- ================= RIGHT: 3D view ================= -->
+  <div id="right" class="pane">
+    <div class="topbar">
+      <span class="step"><span class="num">2</span><span class="ttl">3D-узел</span></span>
+      <span class="tsep"></span>
+      <span class="chip">Цвет <input type="color" id="color" value="#5ad1c7"></span>
+      <span class="chip">Толщина <input type="range" id="thick" min="0.03" max="0.22" step="0.005" value="0.10"><b id="thickVal">0.10</b></span>
+      <span class="tsep"></span>
+      <span class="chip">Распрямление <input type="range" id="bendCoef" min="0" max="10" step="1" value="5"><b id="bendVal">5</b></span>
+      <span class="chip">Самоотталкивание <input type="range" id="repCoef" min="0" max="10" step="1" value="5"><b id="repVal">5</b></span>
+      <span class="tsep"></span>
+      <button id="play" class="go">▶ Физика</button>
+      <button id="exportObj" class="ghost">⬇ OBJ</button>
+      <span class="tspacer"></span>
+      <span class="statuspill" id="statusPill"><span class="dot"></span><span id="status">ожидание узла…</span></span>
+    </div>
+    <div class="stagewrap">
+      <canvas id="gl"></canvas>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+"use strict";
+/* ============================================================================
+   ЧАСТЬ A — 2D РЕДАКТОР: рисование, Catmull-Rom, поиск самопересечений,
+   назначение над/под.
+   ========================================================================== */
+const drawCv = document.getElementById('draw');
+const dctx   = drawCv.getContext('2d');
+let DPR = Math.min(window.devicePixelRatio||1, 2);
+
+let raw = [];            // сырые точки мыши {x,y}
+let smooth = [];         // сглаженная замкнутая ломаная [{x,y}]
+let cumLen = [];         // куммулятивная длина по smooth
+let totalLen2D = 0;
+let crossings = [];      // {x,y, sA, sB, over: 'A'|'B'}  (s — длина дуги)
+let drawing = false, closedCurve = false;
+const START_R = 13;      // радиус стартового кружка для замыкания
+
+function fitCanvas(){
+  const r = drawCv.getBoundingClientRect();
+  drawCv.width  = Math.max(1, r.width *DPR);
+  drawCv.height = Math.max(1, r.height*DPR);
+  dctx.setTransform(DPR,0,0,DPR,0,0);
+  renderDraw();
+}
+function P(e){
+  const r = drawCv.getBoundingClientRect();
+  return {x:e.clientX-r.left, y:e.clientY-r.top};
+}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+
+drawCv.addEventListener('pointerdown',e=>{
+  if(closedCurve){ tryToggleCrossing(P(e)); return; }
+  drawing=true; raw=[P(e)]; smooth=[]; crossings=[]; closedCurve=false;
+  drawCv.setPointerCapture(e.pointerId);
+  renderDraw();
+});
+drawCv.addEventListener('pointermove',e=>{
+  if(!drawing) return;
+  const p=P(e);
+  if(dist(p, raw[raw.length-1])>2.5) raw.push(p);
+  // авто-замыкание при возврате в старт (после достаточной длины)
+  if(raw.length>20 && dist(p, raw[0])<START_R){ finishCurve(true); return; }
+  renderDraw();
+});
+drawCv.addEventListener('pointerup',e=>{
+  if(!drawing) return;
+  drawing=false;
+  finishCurve(raw.length>20 && dist(raw[raw.length-1],raw[0])<START_R*2.5);
+});
+
+function finishCurve(doClose){
+  drawing=false;
+  if(!doClose || raw.length<8){ renderDraw(); return; }
+  closedCurve=true;
+  buildSmooth();
+  findCrossings();
+  updateCrossInfo();
+  document.getElementById('hint').textContent = crossings.length
+    ? 'Кликайте по пересечениям, чтобы менять над/под — 3D обновляется сразу.'
+    : 'Готово — узел появился справа. Нажмите «▶ Физика».';
+  renderDraw();
+  syncKnot3D();            // узел сразу появляется в 3D-окне
+}
+
+// собрать/пересобрать 3D-узел и вписать его в кадр по центру
+function syncKnot3D(){
+  if(buildKnot3D()){ rebuildTube(); fitCamera(false); }
+}
+
+// --- сглаживание замкнутой кривой Catmull-Rom (через three.js) ---
+function buildSmooth(){
+  // прорядим сырые точки
+  const pts=[];
+  for(let i=0;i<raw.length;i++){
+    if(i===0||dist(raw[i],pts[pts.length-1])>4) pts.push(raw[i]);
+  }
+  if(pts.length>4 && dist(pts[0],pts[pts.length-1])<6) pts.pop();
+  if(pts.length<4){ smooth=[]; cumLen=[0]; totalLen2D=0; closedCurve=false; return; }
+  const v = pts.map(p=>new THREE.Vector3(p.x,p.y,0));
+  const curve = new THREE.CatmullRomCurve3(v, true, 'centripetal', 0.5);
+  const n = Math.min(420, Math.max(160, pts.length*6));
+  const sp = curve.getPoints(n);          // n+1, последняя == первая
+  smooth = sp.slice(0,n).map(q=>({x:q.x,y:q.y}));
+  // куммулятивные длины (замкнуто)
+  cumLen=[0]; totalLen2D=0;
+  for(let i=1;i<smooth.length;i++){ totalLen2D+=dist(smooth[i],smooth[i-1]); cumLen.push(totalLen2D); }
+  totalLen2D += dist(smooth[0], smooth[smooth.length-1]);
+}
+
+// --- пересечение отрезков ---
+function segInt(p1,p2,p3,p4){
+  const d1x=p2.x-p1.x,d1y=p2.y-p1.y,d2x=p4.x-p3.x,d2y=p4.y-p3.y;
+  const den=d1x*d2y-d1y*d2x;
+  if(Math.abs(den)<1e-9) return null;
+  const t=((p3.x-p1.x)*d2y-(p3.y-p1.y)*d2x)/den;
+  const u=((p3.x-p1.x)*d1y-(p3.y-p1.y)*d1x)/den;
+  if(t<=0.0001||t>=0.9999||u<=0.0001||u>=0.9999) return null;
+  return {x:p1.x+t*d1x, y:p1.y+t*d1y, t, u};
+}
+function arcAt(i,t){ // длина дуги в точке сегмента i (между smooth[i],smooth[i+1])
+  const a=cumLen[i];
+  const b=(i+1<cumLen.length)?cumLen[i+1]:totalLen2D;
+  return a+t*(b-a);
+}
+function norm2(v){ const L=Math.hypot(v.x,v.y)||1; return {x:v.x/L, y:v.y/L}; }
+function findCrossings(){
+  crossings=[];
+  const N=smooth.length;
+  for(let i=0;i<N;i++){
+    const a1=smooth[i], a2=smooth[(i+1)%N];
+    for(let j=i+2;j<N;j++){
+      if(i===0 && j===N-1) continue;        // соседние через замыкание
+      const b1=smooth[j], b2=smooth[(j+1)%N];
+      const hit=segInt(a1,a2,b1,b2);
+      if(!hit) continue;
+      // кластеризация: не дублировать близкие пересечения
+      let dup=false;
+      for(const c of crossings){ if(Math.hypot(c.x-hit.x,c.y-hit.y)<14){dup=true;break;} }
+      if(dup) continue;
+      // касательные обеих прядей — для качественной отрисовки прохода
+      const dirA=norm2({x:a2.x-a1.x,y:a2.y-a1.y}), dirB=norm2({x:b2.x-b1.x,y:b2.y-b1.y});
+      crossings.push({x:hit.x,y:hit.y, sA:arcAt(i,hit.t), sB:arcAt(j,hit.u), over:'A', dirA, dirB});
+    }
+  }
+}
+function tryToggleCrossing(p){
+  for(const c of crossings){
+    if(Math.hypot(c.x-p.x,c.y-p.y)<16){
+      c.over = c.over==='A'?'B':'A';
+      if(running) stopPhysics('');          // смена прохода = новая исходная форма
+      updateKnotType();                      // тип узла мог поменяться
+      renderDraw();
+      syncKnot3D();                          // 3D-узел обновляется сразу
+      setStatus(isUnknot ? 'тривиальный узел → станет окружностью' : 'проход изменён — нажмите «▶ Физика»');
+      return;
+    }
+  }
+}
+function updateCrossInfo(){
+  document.getElementById('crossInfo').innerHTML='пересечений <b>'+crossings.length+'</b>';
+}
+const CURVE_W = 5;   // толщина пряди в 2D-диаграмме
+
+// точка на сглаженной кривой по длине дуги s (циклически)
+function arcPointOn(s){
+  const M=smooth.length; if(!M) return {x:0,y:0};
+  s=((s%totalLen2D)+totalLen2D)%totalLen2D;
+  let i=0; while(i<M-1 && cumLen[i+1]<s) i++;
+  const a=cumLen[i], b=(i+1<M)?cumLen[i+1]:totalLen2D;
+  const t=(b-a>1e-6)?(s-a)/(b-a):0;
+  const p0=smooth[i], p1=smooth[(i+1)%M];
+  return {x:p0.x+(p1.x-p0.x)*t, y:p0.y+(p1.y-p0.y)*t};
+}
+// обвести кусок кривой [s0-half, s0+half] вдоль настоящей кривой (для разрыва/верха)
+function strokeSpanOn(s0,half){
+  const step=2; dctx.beginPath();
+  let first=true;
+  for(let s=-half;s<=half+1e-6;s+=step){
+    const p=arcPointOn(s0+s);
+    if(first){ dctx.moveTo(p.x,p.y); first=false; } else dctx.lineTo(p.x,p.y);
+  }
+  dctx.stroke();
+}
+
+function renderDraw(){
+  const w=drawCv.clientWidth, h=drawCv.clientHeight;
+  dctx.clearRect(0,0,w,h);
+  // стартовый кружок
+  const startPt = smooth.length?smooth[0]:(raw.length?raw[0]:null);
+  // линия
+  const path = closedCurve ? smooth : raw;
+  if(path.length>1){
+    dctx.lineWidth = closedCurve?CURVE_W:3; dctx.lineJoin='round'; dctx.lineCap='round';
+    dctx.strokeStyle = closedCurve ? '#7fd7ff' : '#9fb3c8';
+    dctx.beginPath();
+    dctx.moveTo(path[0].x,path[0].y);
+    for(let i=1;i<path.length;i++) dctx.lineTo(path[i].x,path[i].y);
+    if(closedCurve) dctx.closePath();
+    dctx.stroke();
+  }
+  if(startPt && !closedCurve){
+    dctx.strokeStyle = (drawing && raw.length>20 && dist(raw[raw.length-1],startPt)<START_R)
+        ? 'var(--over)' : '#6c7a8c';
+    dctx.fillStyle='rgba(122,212,255,.12)';
+    dctx.lineWidth=2;
+    dctx.beginPath(); dctx.arc(startPt.x,startPt.y,START_R,0,7); dctx.fill(); dctx.stroke();
+  }
+  // пересечения — классический вид: нижняя прядь с чистым разрывом, верхняя сплошная.
+  // Разрыв и верхний сегмент идут ВДОЛЬ настоящей кривой → без ложных изломов.
+  if(closedCurve && crossings.length){
+    const curveCol='#7fd7ff';
+    const GAP=13;      // полудлина разрыва нижней пряди (по дуге)
+    const OVER=17;     // полудлина восстановления верхней пряди (чуть больше разрыва)
+    // проход 1 — стираем нижние пряди всех пересечений (до прозрачного фона)
+    dctx.save();
+    dctx.globalCompositeOperation='destination-out';
+    dctx.lineCap='round'; dctx.lineWidth=CURVE_W+6;
+    for(const c of crossings){ const sUnder = c.over==='A'?c.sB:c.sA; strokeSpanOn(sUnder,GAP); }
+    dctx.restore();
+    // проход 2 — поверх рисуем верхние пряди (сплошные)
+    dctx.strokeStyle=curveCol; dctx.lineCap='round'; dctx.lineWidth=CURVE_W;
+    for(const c of crossings){ const sOver = c.over==='A'?c.sA:c.sB; strokeSpanOn(sOver,OVER); }
+    // проход 3 — серые кольца-хендлы (кликните, чтобы поменять проход)
+    dctx.strokeStyle='rgba(150,162,178,0.7)'; dctx.lineWidth=1.5;
+    for(const c of crossings){ dctx.beginPath(); dctx.arc(c.x,c.y,14,0,7); dctx.stroke(); }
+  }
+}
+function getCSS(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+
+document.getElementById('clear').onclick=()=>{
+  raw=[]; smooth=[]; crossings=[]; closedCurve=false; drawing=false;
+  stopPhysics('');
+  verts=[];
+  if(tubeMesh){ tubeMesh.geometry.dispose(); knotGroup.remove(tubeMesh); tubeMesh=null; }
+  document.getElementById('hint').textContent='Зажмите мышь и ведите. Вернитесь в стартовый кружок, чтобы замкнуть.';
+  setStatus('ожидание узла…');
+  updateCrossInfo(); renderDraw();
+};
+
+// --- чередующееся над/под: проходим кривую и поочерёдно «над/под» на каждом
+//     встреченном пересечении. Нужно для неторических узлов (восьмёрка). ---
+function assignAlternating(){
+  if(!crossings.length) return;
+  const visits=[];
+  crossings.forEach((c,ci)=>{ visits.push({s:c.sA,ci,side:'A'}); visits.push({s:c.sB,ci,side:'B'}); });
+  visits.sort((a,b)=>a.s-b.s);
+  let o=true;
+  for(const v of visits){ crossings[v.ci].over = o ? v.side : (v.side==='A'?'B':'A'); o=!o; }
+}
+
+// --- ОПРЕДЕЛИТЕЛЬ УЗЛА (|Δ(−1)|). Строим по диаграмме матрицу Александера в
+//     точке t=−1: на каждом перекрёстке соотношение  arc_in + arc_out − 2·arc_over = 0
+//     (при t=−1 знак перекрёстка не важен). |det минора| = определитель узла.
+//     Тривиальный узел ⟺ определитель = 1 → его равновесие ОБЯЗАНО быть окружностью. ---
+let knotDet=1, isUnknot=true;
+function intDet(A){
+  const n=A.length; if(n===0) return 1;
+  let det=1; const M=A.map(r=>r.slice());
+  for(let c=0;c<n;c++){
+    let p=-1; for(let r=c;r<n;r++) if(Math.abs(M[r][c])>1e-9){ p=r; break; }
+    if(p<0) return 0;
+    if(p!==c){ const t=M[p]; M[p]=M[c]; M[c]=t; det=-det; }
+    for(let r=c+1;r<n;r++){ const f=M[r][c]/M[c][c]; for(let k=c;k<n;k++) M[r][k]-=f*M[c][k]; }
+    det*=M[c][c];
+  }
+  return det;
+}
+function computeDeterminant(){
+  const n=crossings.length; if(n===0) return 1;
+  const unders=[];
+  crossings.forEach((c,ci)=>{ unders.push({ s:(c.over==='A'?c.sB:c.sA), ci }); });
+  unders.sort((a,b)=>a.s-b.s);
+  if(unders.length!==n) return 0;
+  const arcOf=(s)=>{ let k=-1; for(let i=0;i<n;i++) if(unders[i].s<=s) k=i; return k===-1?n-1:k; };
+  const M=Array.from({length:n},()=>new Array(n).fill(0));
+  crossings.forEach((c,ci)=>{
+    const sO=(c.over==='A'?c.sA:c.sB);
+    let ku=-1; for(let i=0;i<n;i++) if(unders[i].ci===ci){ ku=i; break; }
+    const aIn=(ku-1+n)%n, aOut=ku, aOv=arcOf(sO);
+    M[ci][aIn]+=1; M[ci][aOut]+=1; M[ci][aOv]-=2;
+  });
+  const m=n-1, Asub=M.slice(0,m).map(r=>r.slice(0,m));
+  return Math.abs(Math.round(intDet(Asub)));
+}
+function updateKnotType(){ knotDet=computeDeterminant(); isUnknot=(knotDet===1); }
+
+// --- готовые узлы. Каждая запись задаёт плоскую диаграмму и схему над/под,
+//     проверенно дающую именно этот узел после релаксации. ---
+function starPoints(nPts,skip){
+  const order=[]; for(let i=0;i<nPts;i++) order.push((i*skip)%nPts);
+  const vts=order.map(k=>{ const a=-Math.PI/2 + k*2*Math.PI/nPts; return {x:Math.cos(a),y:Math.sin(a)}; });
+  const out=[], M=vts.length;
+  for(let e=0;e<M;e++){ const a=vts[e], b=vts[(e+1)%M];
+    for(let s=0;s<16;s++){ const t=s/16; out.push({x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t}); } }
+  return out;
+}
+function paramPoints(fn,n){ const out=[]; for(let i=0;i<=n;i++) out.push(fn(i/n*Math.PI*2)); return out; }
+
+// торический узел (2,q) в 3D — симметричная «каноническая» форма-затравка
+const torus3d=(q)=>(t)=>({x:(2+Math.cos(q*t))*Math.cos(2*t), y:(2+Math.cos(q*t))*Math.sin(2*t), z:Math.sin(q*t)});
+const PRESETS = {
+  // pts — плоская диаграмма для левой панели; init3d — симметричная 3D-затравка,
+  // из которой релаксация приходит к КАНОНИЧЕСКОМУ виду (а не к «петля+узелок»).
+  trefoil:   { alt:true, pts:()=>paramPoints(t=>({x:Math.sin(t)+2*Math.sin(2*t), y:Math.cos(t)-2*Math.cos(2*t)}),240), init3d:torus3d(3) },
+  figure8:   { alt:true, pts:()=>paramPoints(t=>({x:(2+Math.cos(2*t))*Math.cos(3*t), y:(2+Math.cos(2*t))*Math.sin(3*t)}),260),
+               init3d:t=>({x:(2+Math.cos(2*t))*Math.cos(3*t), y:(2+Math.cos(2*t))*Math.sin(3*t), z:Math.sin(4*t)}) },
+  cinquefoil:{ alt:true, pts:()=>starPoints(5,2), init3d:torus3d(5) },
+  septafoil: { alt:true, pts:()=>starPoints(7,2), init3d:torus3d(7) }
+};
+
+function fitToCanvas(pts){
+  // вписываем произвольные точки в холст по центру с полями
+  let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
+  for(const p of pts){ minx=Math.min(minx,p.x);maxx=Math.max(maxx,p.x);miny=Math.min(miny,p.y);maxy=Math.max(maxy,p.y); }
+  const w=drawCv.clientWidth, h=drawCv.clientHeight;
+  const span=Math.max(maxx-minx,maxy-miny)||1, sc=Math.min(w,h)*0.62/span;
+  const cx=(minx+maxx)/2, cy=(miny+maxy)/2;
+  return pts.map(p=>({x:w/2+(p.x-cx)*sc, y:h/2+(p.y-cy)*sc}));
+}
+
+function loadPreset(key){
+  const P=PRESETS[key]; if(!P) return;
+  raw=fitToCanvas(P.pts());
+  closedCurve=false; drawing=false;
+  finishCurve(true);                     // строит 2D-диаграмму и 3D через лифт
+  if(P.alt){ assignAlternating(); updateKnotType(); renderDraw(); }
+  if(P.init3d){ initVerts3D(P.init3d); rebuildTube(); fitCamera(false); }  // симметричная 3D-затравка
+}
+// поставить 3D-узел из параметрической функции fn(t), сохранив N и полную длину N·L0
+function initVerts3D(fn){
+  if(!verts.length) return;
+  const n=N, pa=[];
+  for(let i=0;i<n;i++) pa.push(fn(i/n*Math.PI*2));
+  let cx=0,cy=0,cz=0; pa.forEach(p=>{cx+=p.x;cy+=p.y;cz+=p.z;}); cx/=n;cy/=n;cz/=n;
+  for(let i=0;i<n;i++) verts[i].set(pa[i].x-cx, pa[i].y-cy, pa[i].z-cz);
+  let tl=0; for(let i=0;i<n;i++) tl+=verts[i].distanceTo(verts[(i+1)%n]);
+  if(tl>1e-6){ const f=(N*L0)/tl; for(const v of verts) v.multiplyScalar(f); }
+  recenter();
+}
+
+document.querySelectorAll('button.ex').forEach(b=>{
+  b.onclick=()=>loadPreset(b.getAttribute('data-knot'));
+});
+
+/* ============================================================================
+   ЧАСТЬ B — ЛИФТ 2D → 3D с учётом над/под, и ресэмплинг до N вершин.
+   ========================================================================== */
+let N = 160;                 // число сегментов (подбирается под длину рисунка)
+let verts = [];              // [THREE.Vector3] замкнутая цепочка
+let L0 = 0;                  // длина ОДНОГО жёсткого сегмента (постоянна)
+let worldScale=1, worldCx=0, worldCy=0;
+
+// рабочие буферы физики — перевыделяются при изменении N
+let _dispx, _dispy, _dispz, _p0x, _p0y, _p0z, _sx, _sy, _sz;
+function allocBuffers(){
+  _dispx=new Float64Array(N); _dispy=new Float64Array(N); _dispz=new Float64Array(N);
+  _p0x=new Float64Array(N); _p0y=new Float64Array(N); _p0z=new Float64Array(N);
+  _sx=new Float64Array(N); _sy=new Float64Array(N); _sz=new Float64Array(N);
+}
+allocBuffers();
+
+// сколько сегментов взять под нарисованную длину: сегмент ≈ постоянной мировой
+// длины, чтобы точность/скорость не зависели от размера и сложности рисунка.
+function chooseN(worldLen){
+  return Math.max(100, Math.min(200, Math.round(worldLen/0.16)));
+}
+
+function circArc(s){ return s; }
+function arcDist(a,b){ let d=Math.abs(a-b); return Math.min(d, totalLen2D-d); }
+
+function buildKnot3D(){
+  if(!closedCurve || smooth.length<4) return false;
+  // масштаб в мир: вписываем в радиус ~3
+  let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
+  for(const p of smooth){minx=Math.min(minx,p.x);maxx=Math.max(maxx,p.x);miny=Math.min(miny,p.y);maxy=Math.max(maxy,p.y);}
+  worldCx=(minx+maxx)/2; worldCy=(miny+maxy)/2;
+  const span=Math.max(maxx-minx, maxy-miny);
+  worldScale = 6.0/Math.max(span,1);
+
+  // высота лифта пропорциональна масштабу диаграммы
+  const H = 0.55;                       // мировые единицы
+  const wWidth = totalLen2D*0.045;      // ширина «горба» по дуге
+
+  // функция высоты z(s) от всех пересечений
+  function zAt(s){
+    let z=0;
+    for(const c of crossings){
+      const aOver = c.over==='A';
+      const dA = arcDist(s,c.sA), dB=arcDist(s,c.sB);
+      const gA = Math.exp(-(dA*dA)/(wWidth*wWidth));
+      const gB = Math.exp(-(dB*dB)/(wWidth*wWidth));
+      z += (aOver? +H:-H)*gA + (aOver? -H:+H)*gB;
+    }
+    return z;
+  }
+
+  // число сегментов под длину рисунка (в мировом масштабе), затем буферы
+  N = chooseN(totalLen2D*worldScale);
+  allocBuffers();
+  // ресэмплинг smooth до N равных по дуге вершин
+  verts=[];
+  const step=totalLen2D/N;
+  let si=0, acc=0;
+  const M=smooth.length;
+  // массив длин сегментов smooth
+  for(let k=0;k<N;k++){
+    const target=k*step;
+    // найдём положение target вдоль smooth
+    while(si<M-1 && cumLen[si+1]<target) si++;
+    const a=cumLen[si], b=(si+1<M)?cumLen[si+1]:totalLen2D;
+    const t=(b-a>1e-6)?(target-a)/(b-a):0;
+    const p0=smooth[si], p1=smooth[(si+1)%M];
+    const px=p0.x+(p1.x-p0.x)*t, py=p0.y+(p1.y-p0.y)*t;
+    const X=(px-worldCx)*worldScale;
+    const Y=-(py-worldCy)*worldScale;
+    const Z=zAt(target);
+    verts.push(new THREE.Vector3(X, Y, Z));
+  }
+  // центрируем
+  recenter();
+  // целевая длина ребра
+  let tl=0; for(let i=0;i<N;i++) tl+=verts[i].distanceTo(verts[(i+1)%N]);
+  L0 = tl/N;
+  updateKnotType();            // тривиальный узел? → релаксация в окружность
+  return true;
+}
+
+function recenter(){
+  let cx=0,cy=0,cz=0;
+  for(const v of verts){cx+=v.x;cy+=v.y;cz+=v.z;}
+  cx/=N;cy/=N;cz/=N;
+  for(const v of verts){v.x-=cx;v.y-=cy;v.z-=cz;}
+}
+
+/* ============================================================================
+   ЧАСТЬ C — OVERDAMPED ФИЗИКА ПО СИЛАМ (без скоростей и инерции).
+   Модель узла как упругой струны из жёстких сегментов:
+   • Сегменты АБСОЛЮТНО ЖЁСТКИЕ, длина каждого = L0 (постоянна) — проекция рёбер.
+   • Сегменты свободно вращаются вдоль струны: работаем только с положениями,
+     никакого «фрейма»/кручения → скручивание не создаёт момента (п.2).
+   • Сила РАСПРЯМЛЕНИЯ на каждом стыке: направлена к хорде (лапласиан), величина
+     растёт как степень угла между соседними сегментами  |F| ~ угол^(bendPow−1)
+     (bendPow = 2/3/4). Сумма таких сил по всему узлу распрямляет его (п.3,4).
+   • Сила САМООТТАЛКИВАНИЯ между НЕсоседними сегментами  |F| ~ 1/d^repPow
+     (repPow = 2/3); соседей по дуге пропускаем (п.5).
+   • Шаг overdamped: сложить все силы → сдвинуть → жёсткие ограничения длины и
+     зазора между прядями. Никаких скоростей → нет волн, звона, дрожания.
+   ========================================================================== */
+let bendCoef=5, bendPow=2, repCoef=5, repPow=2;   // задаются ползунками/окошками
+const SKIP = 3;              // соседи по дуге для ЖЁСТКОГО зазора (топология)
+let settleCount=0;
+
+function bendingPass(alpha){
+  // Сила РАСПРЯМЛЕНИЯ стыка: направление — к хорде (лапласиан = уменьшение угла
+  // между соседними сегментами), величина растёт как степень угла:
+  //   |смещение| ∝ угол^(bendPow−1).
+  // Т.к. |лапласиан| ∝ углу, домножаем на (|лапл|/L0)^(bendPow−2): при bendPow=2
+  // это чистое сглаживание кривизны (→ точная окружность для петли), при 3 и 4
+  // острые изгибы распрямляются гораздо сильнее пологих → кривизна раскладывается
+  // ровно по всему узлу. Якоби (сначала все лапласианы, потом сдвиг) → без волн.
+  for(let i=0;i<N;i++){
+    const a=verts[(i-1+N)%N], b=verts[(i+1)%N], p=verts[i];
+    _dispx[i]=0.5*(a.x+b.x)-p.x; _dispy[i]=0.5*(a.y+b.y)-p.y; _dispz[i]=0.5*(a.z+b.z)-p.z;
+  }
+  for(let i=0;i<N;i++){
+    const m=Math.sqrt(_dispx[i]*_dispx[i]+_dispy[i]*_dispy[i]+_dispz[i]*_dispz[i]);
+    if(m<1e-12) continue;
+    const w=alpha*Math.pow(m/L0, bendPow-2);
+    verts[i].x+=w*_dispx[i]; verts[i].y+=w*_dispy[i]; verts[i].z+=w*_dispz[i];
+  }
+}
+
+const REP_BASE=0.28;   // СОБСТВЕННАЯ толщина струны: самоотталкивание есть всегда,
+                       // даже при ползунке 0 — реальная упругая проволока не может
+                       // стянуться в точку, она сама себя отталкивает. Поэтому узел
+                       // НИКОГДА не затягивается в тугой узелок, а держит гладкую,
+                       // распрямлённую (каноническую) форму. Ползунок добавляет сверху.
+function repulsionForce(){
+  // Самоотталкивание сегментов: |F| ~ (база+repCoef)·(L0/d)^repPow (repPow=2/3),
+  // только между далёкими по дуге прядями (соседей пропускаем — иначе распирало
+  // бы прямые участки). Раздувает узел в объёмную форму и держит пряди врозь.
+  // Якоби (накопить → ограничить → сдвинуть). Для НЕзапутанной петли не зовётся.
+  const skip=Math.max(SKIP+1, Math.round(N*0.08));
+  const c=REP_BASE + repCoef*0.09, maxMove=0.30*L0;
+  for(let i=0;i<N;i++){ _dispx[i]=0;_dispy[i]=0;_dispz[i]=0; }
+  for(let i=0;i<N;i++){
+    const pix=verts[i].x, piy=verts[i].y, piz=verts[i].z;
+    for(let j=i+1;j<N;j++){
+      const cd=Math.min((j-i),(N-(j-i)));
+      if(cd<=skip) continue;
+      const dx=pix-verts[j].x, dy=piy-verts[j].y, dz=piz-verts[j].z;
+      let d2=dx*dx+dy*dy+dz*dz; if(d2<1e-12) d2=1e-12;
+      const d=Math.sqrt(d2);
+      const f=c*Math.pow(L0/d, repPow)/d;   // |смещение|=c·(L0/d)^repPow; вектор = f·r
+      _dispx[i]+=f*dx; _dispy[i]+=f*dy; _dispz[i]+=f*dz;
+      _dispx[j]-=f*dx; _dispy[j]-=f*dy; _dispz[j]-=f*dz;
+    }
+  }
+  for(let i=0;i<N;i++){
+    const m=Math.sqrt(_dispx[i]*_dispx[i]+_dispy[i]*_dispy[i]+_dispz[i]*_dispz[i]);
+    const s=m>maxMove?maxMove/m:1;
+    verts[i].x+=_dispx[i]*s; verts[i].y+=_dispy[i]*s; verts[i].z+=_dispz[i]*s;
+  }
+}
+
+// ---- САМОНЕПРОНИКНОВЕНИЕ по ОТРЕЗКАМ (сегмент-сегмент) ----
+// Настоящая толщина струны: меряем реальное расстояние между отрезками (а не
+// между вершинами) и держим его ≥ COLLIDE_D. Это единственная топологическая
+// сила: настоящий узел не может пройти сквозь себя, а тривиальная петля/кинк
+// свободно распускается (пряди просто скользят на расстоянии толщины) → круг.
+const COLLIDE_D=1.6;   // толщина само-непроникновения в единицах L0
+function _clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+// ближайшие точки двух отрезков p1q1 и p2q2 → {s,t,dist, dx,dy,dz (из B в A)}
+function _closestSeg(p1,q1,p2,q2){
+  const d1x=q1.x-p1.x,d1y=q1.y-p1.y,d1z=q1.z-p1.z, d2x=q2.x-p2.x,d2y=q2.y-p2.y,d2z=q2.z-p2.z;
+  const rx=p1.x-p2.x,ry=p1.y-p2.y,rz=p1.z-p2.z;
+  const a=d1x*d1x+d1y*d1y+d1z*d1z, e=d2x*d2x+d2y*d2y+d2z*d2z, f=d2x*rx+d2y*ry+d2z*rz;
+  let s,t; const E=1e-12;
+  if(a<=E&&e<=E){ s=0; t=0; }
+  else if(a<=E){ s=0; t=_clamp(f/e,0,1); }
+  else{ const c=d1x*rx+d1y*ry+d1z*rz;
+    if(e<=E){ t=0; s=_clamp(-c/a,0,1); }
+    else{ const b=d1x*d2x+d1y*d2y+d1z*d2z, dn=a*e-b*b;
+      s=dn>E?_clamp((b*f-c*e)/dn,0,1):0; t=(b*s+f)/e;
+      if(t<0){ t=0; s=_clamp(-c/a,0,1); } else if(t>1){ t=1; s=_clamp((b-c)/a,0,1); } } }
+  const ax=p1.x+d1x*s,ay=p1.y+d1y*s,az=p1.z+d1z*s, bx=p2.x+d2x*t,by=p2.y+d2y*t,bz=p2.z+d2z*t;
+  const dx=ax-bx,dy=ay-by,dz=az-bz;
+  return {s,t,dist:Math.sqrt(dx*dx+dy*dy+dz*dz),dx,dy,dz};
+}
+function segCollide(iter){
+  const D=COLLIDE_D*L0;
+  for(let it=0;it<iter;it++){
+    for(let i=0;i<N;i++){ _sx[i]=0;_sy[i]=0;_sz[i]=0; }
+    for(let i=0;i<N;i++){ const ip=(i+1)%N;
+      for(let j=i+1;j<N;j++){ const jp=(j+1)%N;
+        const cd=Math.min((j-i),(N-(j-i))); if(cd<=2) continue;   // соседние рёбра пропускаем
+        const r=_closestSeg(verts[i],verts[ip],verts[j],verts[jp]);
+        if(r.dist>=D || r.dist<1e-9) continue;
+        const push=0.5*(D-r.dist)/r.dist;
+        const ox=r.dx*push, oy=r.dy*push, oz=r.dz*push;
+        const wa0=1-r.s, wa1=r.s, wb0=1-r.t, wb1=r.t;
+        _sx[i]+=ox*wa0;_sy[i]+=oy*wa0;_sz[i]+=oz*wa0; _sx[ip]+=ox*wa1;_sy[ip]+=oy*wa1;_sz[ip]+=oz*wa1;
+        _sx[j]-=ox*wb0;_sy[j]-=oy*wb0;_sz[j]-=oz*wb0; _sx[jp]-=ox*wb1;_sy[jp]-=oy*wb1;_sz[jp]-=oz*wb1;
+      }
+    }
+    for(let i=0;i<N;i++){ verts[i].x+=_sx[i]; verts[i].y+=_sy[i]; verts[i].z+=_sz[i]; }
+  }
+}
+// есть ли САМОКАСАНИЕ (пряди на расстоянии толщины) → это признак настоящего узла.
+// Для окружности самокасаний нет вовсе.
+function hasSelfContact(){
+  const D=COLLIDE_D*L0*1.35;
+  for(let i=0;i<N;i++){ const ip=(i+1)%N;
+    for(let j=i+1;j<N;j++){ const jp=(j+1)%N;
+      const cd=Math.min((j-i),(N-(j-i))); if(cd<=3) continue;
+      if(_closestSeg(verts[i],verts[ip],verts[j],verts[jp]).dist < D) return true;
+    }
+  }
+  return false;
+}
+
+function safetyClamp(){
+  // предохранитель: если что-то стало нечисловым или длина сильно уехала —
+  // возвращаем в разумные пределы (инвариант «узел не улетает/не взрывается»).
+  let tl=0, bad=false;
+  for(let i=0;i<N;i++){ tl+=verts[i].distanceTo(verts[(i+1)%N]);
+    if(!isFinite(verts[i].x)||!isFinite(verts[i].y)||!isFinite(verts[i].z)) bad=true; }
+  const target=N*L0;
+  if(bad){ rebuildFromCircle(); return; }
+  if(tl > 1.8*target && tl>1e-6){ const f=target/tl; for(const v of verts) v.multiplyScalar(f); }
+}
+function rebuildFromCircle(){
+  const R=N*L0/(2*Math.PI);
+  for(let i=0;i<N;i++){ const a=i/N*Math.PI*2; verts[i]=new THREE.Vector3(R*Math.cos(a),R*Math.sin(a),0); }
+}
+
+// разброс расстояний вершин от центра / средний радиус (в %). ~0 = окружность.
+function curveRvar(){
+  let cx=0,cy=0,cz=0; for(const v of verts){ cx+=v.x; cy+=v.y; cz+=v.z; }
+  cx/=N; cy/=N; cz/=N;
+  let s=0, s2=0;
+  for(const v of verts){ const r=Math.hypot(v.x-cx,v.y-cy,v.z-cz); s+=r; s2+=r*r; }
+  const m=s/N, varr=Math.max(0, s2/N - m*m);
+  return m>1e-9 ? 100*Math.sqrt(varr)/m : 0;
+}
+// проекция на плоскость наилучшего приближения (сплющивание): убирает «выгибание»
+// незапутанной петли в седло. Нормаль = собств. вектор наим. дисперсии (power-iter).
+function planarizePass(alpha){
+  let cx=0,cy=0,cz=0; for(const v of verts){ cx+=v.x; cy+=v.y; cz+=v.z; } cx/=N; cy/=N; cz/=N;
+  let xx=0,yy=0,zz=0,xy=0,xz=0,yz=0;
+  for(const v of verts){ const dx=v.x-cx,dy=v.y-cy,dz=v.z-cz;
+    xx+=dx*dx; yy+=dy*dy; zz+=dz*dz; xy+=dx*dy; xz+=dx*dz; yz+=dy*dz; }
+  const tr=xx+yy+zz, m00=tr-xx,m11=tr-yy,m22=tr-zz,m01=-xy,m02=-xz,m12=-yz;
+  let nx=0.32,ny=0.55,nz=0.77;
+  for(let it=0;it<28;it++){
+    const ax=m00*nx+m01*ny+m02*nz, ay=m01*nx+m11*ny+m12*nz, az=m02*nx+m12*ny+m22*nz;
+    const L=Math.hypot(ax,ay,az)||1; nx=ax/L; ny=ay/L; nz=az/L;
+  }
+  for(const v of verts){ const d=(v.x-cx)*nx+(v.y-cy)*ny+(v.z-cz)*nz;
+    v.x-=alpha*d*nx; v.y-=alpha*d*ny; v.z-=alpha*d*nz; }
+}
+function rescaleToTarget(){
+  // ПОСТОЯННАЯ полная длина узла = N·L0 (п.6). Однородный масштаб не искажает
+  // форму, но даёт «дыхание»: сила изгиба слегка ужимает кривую, а масштаб
+  // возвращает размер — так распрямление идёт до конца (петля → ровный круг),
+  // при этом узел не схлопывается и не раздувается.
+  let tl=0; for(let i=0;i<N;i++) tl+=verts[i].distanceTo(verts[(i+1)%N]);
+  if(isFinite(tl) && tl>1e-6){ const f=(N*L0)/tl; for(const v of verts) v.multiplyScalar(f); }
+}
+function resampleUniform(){
+  // равномерно по длине дуги: сегменты одинаковой длины (жёсткие, п.6) + точки
+  // могут скользить ВДОЛЬ кривой к своим местам — без этого распрямление
+  // «застревает» на не-круге. Скольжение вдоль кривой топологию не меняет.
+  const cum=[0]; let L=0;
+  for(let i=1;i<=N;i++){ L+=verts[i%N].distanceTo(verts[i-1]); cum.push(L); }
+  if(!isFinite(L) || L<1e-6) return;
+  const step=L/N; let seg=0;
+  const ox=new Float64Array(N), oy=new Float64Array(N), oz=new Float64Array(N);
+  for(let k=0;k<N;k++){
+    const tg=k*step;
+    while(seg<N-1 && cum[seg+1]<tg) seg++;
+    const a=cum[seg], b=cum[seg+1], t=(b-a>1e-9)?(tg-a)/(b-a):0;
+    const p0=verts[seg], p1=verts[(seg+1)%N];
+    ox[k]=p0.x+(p1.x-p0.x)*t; oy[k]=p0.y+(p1.y-p0.y)*t; oz[k]=p0.z+(p1.z-p0.z)*t;
+  }
+  for(let i=0;i<N;i++) verts[i].set(ox[i], oy[i], oz[i]);
+}
+
+// Фаза релаксации: false — только распрямление+само-непроникновение (тривиальная
+// петля свободно распускается в ОКРУЖНОСТЬ; настоящий узел лишь сплющивается, но
+// не развязывается). true — добавляется отталкивание, чтобы настоящий узел
+// раскрылся в гладкую объёмную (каноническую) форму. Переключается в animate().
+let physRepOn=false;
+function relaxStep(){
+  for(let i=0;i<N;i++){ _p0x[i]=verts[i].x; _p0y[i]=verts[i].y; _p0z[i]=verts[i].z; }
+  // 1) распрямление, ЧЕРЕДУЯ с непроникновением: коллизия гасит большой сдвиг сразу,
+  //    поэтому струна не «протягивается» тоньше своей толщины (нет тугого узелка).
+  const alpha=Math.min(0.33, bendCoef*0.05);
+  for(let p=0;p<4;p++){ bendingPass(alpha); segCollide(2); }
+  // 2) отталкивание — только в фазе 2 (раскрытие настоящего узла)
+  if(physRepOn) repulsionForce();
+  // 3) равномерность по дуге + постоянная длина
+  resampleUniform();
+  recenter();
+  rescaleToTarget();                     // постоянная полная длина (п.6)
+  // 4) финальный проход непроникновения по отрезкам (топология)
+  segCollide(4);
+  recenter();
+  const maxStep=0.6*L0;                  // анти-туннелирование за кадр
+  for(let i=0;i<N;i++){
+    const dx=verts[i].x-_p0x[i], dy=verts[i].y-_p0y[i], dz=verts[i].z-_p0z[i];
+    const m=Math.sqrt(dx*dx+dy*dy+dz*dz);
+    if(m>maxStep){ const s=maxStep/m; verts[i].set(_p0x[i]+dx*s, _p0y[i]+dy*s, _p0z[i]+dz*s); }
+  }
+  safetyClamp();
+}
+
+/* ============================================================================
+   ЧАСТЬ D — THREE.JS СЦЕНА: трубка, пол, мягкая тень, материалы.
+   ========================================================================== */
+const glCv=document.getElementById('gl');
+let renderer, scene, camera, controls, tubeMesh, tubeMat, floor, grid, knotGroup;
+let tubeColor='#5ad1c7', tubeRadius=0.10;
+const EMISSIVE_K=0.20;   // сила собственного свечения трубки (чтобы не исчезала)
+const FLOOR_Y=-4.2;
+
+function initGL(){
+  renderer=new THREE.WebGLRenderer({canvas:glCv, antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+  renderer.shadowMap.enabled=true;
+  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.outputEncoding=THREE.sRGBEncoding;
+
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color('#0e1116');
+  // без тумана: он «топил» дальние участки узла в фоне (узел исчезал в темноте)
+
+  camera=new THREE.PerspectiveCamera(45,1,0.1,200);
+  camera.position.set(0,2.5,12);
+
+  controls=new THREE.OrbitControls(camera, glCv);
+  controls.enableDamping=true; controls.dampingFactor=0.08;
+  controls.enablePan=false;              // без панорамы → узел всегда по центру
+  controls.target.set(0,0,0);
+
+  // свет — со всех сторон, чтобы узел был виден целиком в любом ракурсе,
+  // но не «выбеленный» (сохраняем цвет)
+  const amb=new THREE.AmbientLight('#8496ad', 0.65);
+  scene.add(amb);
+  const hemi=new THREE.HemisphereLight('#dcecff','#333c48', 0.6);
+  scene.add(hemi);
+  const key=new THREE.DirectionalLight('#ffffff',1.1);
+  key.position.set(6,12,7);
+  key.castShadow=true;
+  key.shadow.mapSize.set(2048,2048);
+  key.shadow.radius=6;
+  key.shadow.camera.near=1; key.shadow.camera.far=40;
+  const s=10; key.shadow.camera.left=-s; key.shadow.camera.right=s;
+  key.shadow.camera.top=s; key.shadow.camera.bottom=-s;
+  key.shadow.bias=-0.0006;
+  scene.add(key);
+  const fill=new THREE.DirectionalLight('#bcd4ff',0.6);
+  fill.position.set(-8,4,-3); scene.add(fill);
+  // контровой свет сзади-снизу: подсвечивает тёмную сторону, узел не пропадает
+  const rim=new THREE.DirectionalLight('#9fe8df',0.5);
+  rim.position.set(-4,-6,-8); scene.add(rim);
+
+  // пол
+  const fgeo=new THREE.PlaneGeometry(120,120);
+  const fmat=new THREE.MeshStandardMaterial({color:'#10151c',roughness:0.95,metalness:0.0});
+  floor=new THREE.Mesh(fgeo,fmat);
+  floor.rotation.x=-Math.PI/2; floor.position.y=FLOOR_Y;
+  floor.receiveShadow=true;
+  scene.add(floor);
+  grid=new THREE.GridHelper(120,120,'#1c2530','#161d26');
+  grid.position.y=FLOOR_Y+0.001; scene.add(grid);
+
+  knotGroup=new THREE.Group();
+  scene.add(knotGroup);
+
+  // меньше «металла» (металл в тёмной сцене чёрный) + заметное собственное
+  // свечение: узел всегда светится своим цветом и не тонет в темноте.
+  tubeMat=new THREE.MeshStandardMaterial({
+    color:tubeColor, roughness:0.42, metalness:0.35,
+    emissive:new THREE.Color(tubeColor).multiplyScalar(EMISSIVE_K)});
+
+  window.addEventListener('resize',onResize);
+  // холст живёт в flex-раскладке: ловим финальный размер и любые изменения панели
+  if(window.ResizeObserver){ new ResizeObserver(onResize).observe(glCv.parentElement); }
+  onResize();
+  animate();
+}
+
+function rebuildTube(){
+  if(!verts.length) return;
+  const pts=verts.map(v=>v.clone());
+  const curve=new THREE.CatmullRomCurve3(pts,true,'centripetal',0.5);
+  const geo=new THREE.TubeGeometry(curve, N*2, tubeRadius, 14, true);
+  if(tubeMesh){ tubeMesh.geometry.dispose(); tubeMesh.geometry=geo; }
+  else{
+    tubeMesh=new THREE.Mesh(geo,tubeMat);
+    tubeMesh.castShadow=true; tubeMesh.receiveShadow=true;
+    knotGroup.add(tubeMesh);
+  }
+  updateFloor();
+}
+
+function updateFloor(){
+  // пол всегда чуть НИЖЕ самой низкой точки узла → узел никогда не уходит под пол,
+  // но и не висит слишком высоко (размер узла в ходе релаксации меняется).
+  if(!floor || !verts.length) return;
+  let minY=Infinity; for(const v of verts) if(v.y<minY) minY=v.y;
+  const y=minY - tubeRadius - 0.35;
+  floor.position.y=y;
+  if(grid) grid.position.y=y+0.002;
+}
+
+function onResize(){
+  const r=glCv.parentElement.getBoundingClientRect();
+  if(r.width<2||r.height<2) return;
+  renderer.setSize(r.width,r.height);  // updateStyle=true → холст точно по размеру панели
+  camera.aspect=r.width/Math.max(1,r.height);
+  camera.updateProjectionMatrix();
+  fitCamera(true);                     // сохраняем ракурс, держим узел в центре
+}
+
+function fitCamera(keepDir){
+  // авто-кадрирование: узел всегда целиком и по центру кадра (с учётом аспекта).
+  if(!verts.length) return;
+  let c=new THREE.Vector3(); verts.forEach(v=>c.add(v)); c.multiplyScalar(1/N);
+  let R=0; verts.forEach(v=>R=Math.max(R,v.distanceTo(c)));
+  R=Math.max(R,2);
+  const fov=camera.fov*Math.PI/180, aspect=Math.max(0.35,camera.aspect);
+  const distV=R/Math.tan(fov/2), distH=R/(Math.tan(fov/2)*aspect);
+  const dist=Math.max(distV,distH)*1.25 + R*0.6;
+  let dir;
+  if(keepDir){ dir=camera.position.clone().sub(controls.target);
+    if(dir.length()<1e-3) dir.set(0.32,0.30,1); }
+  else dir=new THREE.Vector3(0.32,0.30,1);
+  dir.normalize().multiplyScalar(dist);
+  camera.position.set(dir.x, dir.y, dir.z);
+  controls.target.set(0,0,0); controls.update();
+}
+
+let running=false;
+const STEPS_PER_FRAME=6;   // несколько шагов релаксации за кадр → быстрее к равновесию
+function animate(){
+  requestAnimationFrame(animate);
+  if(running && verts.length){
+    let maxMove=0;
+    for(let k=0;k<STEPS_PER_FRAME;k++) maxMove=stepAndMeasure();   // несколько шагов за кадр
+    rebuildTube();
+    const settleEps=0.0025*L0;
+    if(maxMove<settleEps){ settleCount++; } else settleCount=0;
+    if(physPhase===1){
+      // ТРИВИАЛЬНЫЙ узел: распрямление + непроникновение, БЕЗ отталкивания. Любое
+      // скручивание (writhe) свободно раскручивается вдоль струны → ОКРУЖНОСТЬ.
+      // Замираем ТОЛЬКО когда это реально круг. Если движение встало, а круга нет —
+      // застряли у седла: сплющиваем (planarize).
+      const rv=curveRvar();
+      if(maxMove<settleEps && rv>=1.2){ settleCount=0; planarizePass(0.6); }
+      if(settleCount>20){ stopPhysics('тривиальный узел → окружность'); }
+      else setStatus('раскручивание… разброс '+rv.toFixed(1)+'%');
+    } else {
+      // НАСТОЯЩИЙ узел: гладкая объёмная (каноническая) форма
+      if(settleCount>25){ stopPhysics('равновесие достигнуто'); }
+      else setStatus('релаксация… Δ='+maxMove.toExponential(1));
+    }
+  }
+  controls.target.set(0,0,0);          // центр вращения фиксирован в начале координат
+  controls.update();
+  renderer.render(scene,camera);
+}
+
+function stepAndMeasure(){
+  const before=verts.map(v=>v.clone());
+  relaxStep();
+  let m=0; for(let i=0;i<N;i++) m=Math.max(m, verts[i].distanceTo(before[i]));
+  return m;
+}
+
+let physPhase=1;
+function startPhysics(){
+  if(!verts.length) return;
+  running=true; settleCount=0;
+  // ТИП УЗЛА берём из определителя диаграммы (топологически точно, не путается со
+  // скручиванием/writhe): =1 → тривиальный (фаза 1, распускаем в круг); >1 → узел
+  // (фаза 2, отталкивание раскрывает в каноническую форму).
+  physPhase = isUnknot ? 1 : 2;
+  physRepOn = !isUnknot;
+  document.getElementById('play').textContent='⏸ Пауза';
+  const pill=document.getElementById('statusPill'); if(pill){ pill.classList.add('run'); pill.classList.remove('done'); }
+  setStatus(isUnknot ? 'раскручивание…' : 'релаксация…');
+}
+function stopPhysics(msg){
+  running=false;
+  document.getElementById('play').textContent='▶ Физика';
+  const pill=document.getElementById('statusPill');
+  if(pill){ pill.classList.remove('run'); if(msg) pill.classList.add('done'); }
+  if(msg) setStatus(msg);
+}
+function setStatus(t){ document.getElementById('status').textContent=t; }
+
+/* ============================================================================
+   ЧАСТЬ E — UI-СВЯЗКА
+   ========================================================================== */
+document.getElementById('play').onclick=()=>{ running?stopPhysics(''):startPhysics(); };
+
+const bendCoefEl=document.getElementById('bendCoef'), repCoefEl=document.getElementById('repCoef');
+const thick=document.getElementById('thick'), color=document.getElementById('color');
+bendCoefEl.oninput=()=>{ bendCoef=+bendCoefEl.value; document.getElementById('bendVal').textContent=bendCoefEl.value; };
+repCoefEl.oninput =()=>{ repCoef=+repCoefEl.value;  document.getElementById('repVal').textContent=repCoefEl.value; };
+thick.oninput=()=>{ tubeRadius=+thick.value; document.getElementById('thickVal').textContent=(+thick.value).toFixed(2); rebuildTube(); };
+color.oninput=()=>{ tubeColor=color.value; tubeMat.color.set(tubeColor);
+  tubeMat.emissive=new THREE.Color(tubeColor).multiplyScalar(EMISSIVE_K); };
+
+// --- экспорт 3D-трубки в OBJ (вершины + нормали + треугольники) ---
+function exportOBJ(){
+  if(!tubeMesh){ setStatus('сначала нарисуйте узел слева'); return; }
+  const g=tubeMesh.geometry, pos=g.attributes.position, nor=g.attributes.normal, idx=g.index;
+  const L=[]; L.push('# Топологический узел — экспорт трубки', 'o knot');
+  for(let i=0;i<pos.count;i++) L.push('v '+pos.getX(i).toFixed(5)+' '+pos.getY(i).toFixed(5)+' '+pos.getZ(i).toFixed(5));
+  if(nor) for(let i=0;i<nor.count;i++) L.push('vn '+nor.getX(i).toFixed(4)+' '+nor.getY(i).toFixed(4)+' '+nor.getZ(i).toFixed(4));
+  if(idx){ for(let i=0;i<idx.count;i+=3){ const a=idx.getX(i)+1,b=idx.getX(i+1)+1,c=idx.getX(i+2)+1;
+    L.push(nor? `f ${a}//${a} ${b}//${b} ${c}//${c}` : `f ${a} ${b} ${c}`); } }
+  const blob=new Blob([L.join('\n')+'\n'],{type:'text/plain'});
+  const url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download='knot.obj'; document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  setStatus('OBJ сохранён ('+pos.count+' вершин)');
+}
+document.getElementById('exportObj').onclick=exportOBJ;
+
+window.addEventListener('resize', fitCanvas);
+
+// старт
+fitCanvas();
+updateCrossInfo();
+initGL();
+</script>
+</body>
+</html>
