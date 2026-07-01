@@ -121,6 +121,7 @@
         <button class="ex" data-knot="septafoil" title="Семилистник 7₁">7₁</button>
       </span>
       <span class="chip" id="crossInfo">пересечений <b>0</b></span>
+      <span class="chip" id="knotType" title="Определитель диаграммы: 1 — тривиальный узел (распрямится в окружность)">тип <b>—</b></span>
       <span class="tspacer"></span>
       <span class="hint" id="hint">Ведите мышью, вернитесь в старт · кликайте пересечения — над/под</span>
     </div>
@@ -251,7 +252,9 @@ function segInt(p1,p2,p3,p4){
   if(Math.abs(den)<1e-9) return null;
   const t=((p3.x-p1.x)*d2y-(p3.y-p1.y)*d2x)/den;
   const u=((p3.x-p1.x)*d1y-(p3.y-p1.y)*d1x)/den;
-  if(t<=0.0001||t>=0.9999||u<=0.0001||u>=0.9999) return null;
+  // полуоткрытый [0,1): пересечение точно в вершине ломаной учитывается РОВНО один
+  // раз (в следующем сегменте), а не отбрасывается в обоих смежных, как раньше
+  if(t<0||t>=1||u<0||u>=1) return null;
   return {x:p1.x+t*d1x, y:p1.y+t*d1y, t, u};
 }
 function arcAt(i,t){ // длина дуги в точке сегмента i (между smooth[i],smooth[i+1])
@@ -263,6 +266,10 @@ function norm2(v){ const L=Math.hypot(v.x,v.y)||1; return {x:v.x/L, y:v.y/L}; }
 function findCrossings(){
   crossings=[];
   const N=smooth.length;
+  // допуск слияния дублей — ПО ДУГЕ (пара прядей!), а не по пикселям на экране:
+  // раньше близость <14px к ЧУЖОМУ пересечению молча удаляла настоящее пересечение
+  // (другая пара прядей) → диаграмма врала, определитель считал другой узел.
+  const sTol = 3*(totalLen2D/Math.max(N,1));
   for(let i=0;i<N;i++){
     const a1=smooth[i], a2=smooth[(i+1)%N];
     for(let j=i+2;j<N;j++){
@@ -270,27 +277,31 @@ function findCrossings(){
       const b1=smooth[j], b2=smooth[(j+1)%N];
       const hit=segInt(a1,a2,b1,b2);
       if(!hit) continue;
-      // кластеризация: не дублировать близкие пересечения
+      const sA=arcAt(i,hit.t), sB=arcAt(j,hit.u);
+      // дубль — только если СОВПАДАЮТ ОБЕ дуговые позиции (та же пара прядей)
       let dup=false;
-      for(const c of crossings){ if(Math.hypot(c.x-hit.x,c.y-hit.y)<14){dup=true;break;} }
+      for(const c of crossings){
+        if(arcDist2D(c.sA,sA)<sTol && arcDist2D(c.sB,sB)<sTol){ dup=true; break; }
+      }
       if(dup) continue;
       // касательные обеих прядей — для качественной отрисовки прохода
       const dirA=norm2({x:a2.x-a1.x,y:a2.y-a1.y}), dirB=norm2({x:b2.x-b1.x,y:b2.y-b1.y});
-      crossings.push({x:hit.x,y:hit.y, sA:arcAt(i,hit.t), sB:arcAt(j,hit.u), over:'A', dirA, dirB});
+      crossings.push({x:hit.x,y:hit.y, sA, sB, over:'A', dirA, dirB});
     }
   }
 }
+function arcDist2D(a,b){ let d=Math.abs(a-b); return Math.min(d, totalLen2D-d); }
 function tryToggleCrossing(p){
-  for(const c of crossings){
-    if(Math.hypot(c.x-p.x,c.y-p.y)<16){
-      c.over = c.over==='A'?'B':'A';
-      if(running) stopPhysics('');          // смена прохода = новая исходная форма
-      updateKnotType();                      // тип узла мог поменяться
-      renderDraw();
-      syncKnot3D();                          // 3D-узел обновляется сразу
-      setStatus(isUnknot ? 'тривиальный узел → станет окружностью' : 'проход изменён — нажмите «▶ Физика»');
-      return;
-    }
+  // ближайшее пересечение в радиусе клика (соседние могут быть ближе 16px друг к другу)
+  let c=null, bd=16;
+  for(const cc of crossings){ const d=Math.hypot(cc.x-p.x,cc.y-p.y); if(d<bd){bd=d;c=cc;} }
+  if(c){
+    c.over = c.over==='A'?'B':'A';
+    if(running) stopPhysics('');          // смена прохода = новая исходная форма
+    updateKnotType();                      // тип узла мог поменяться
+    renderDraw();
+    syncKnot3D();                          // 3D-узел обновляется сразу
+    setStatus(isUnknot ? 'тривиальный узел → станет окружностью' : 'проход изменён — нажмите «▶ Физика»');
   }
 }
 function updateCrossInfo(){
@@ -419,7 +430,11 @@ function computeDeterminant(){
   const m=n-1, Asub=M.slice(0,m).map(r=>r.slice(0,m));
   return Math.abs(Math.round(intDet(Asub)));
 }
-function updateKnotType(){ knotDet=computeDeterminant(); isUnknot=(knotDet===1); }
+function updateKnotType(){
+  knotDet=computeDeterminant(); isUnknot=(knotDet===1);
+  const el=document.getElementById('knotType');
+  if(el) el.innerHTML = isUnknot ? 'тип <b>тривиальный</b>' : 'тип <b>узел · det '+knotDet+'</b>';
+}
 
 // --- готовые узлы. Каждая запись задаёт плоскую диаграмму и схему над/под,
 //     проверенно дающую именно этот узел после релаксации. ---
@@ -514,35 +529,56 @@ function buildKnot3D(){
   const span=Math.max(maxx-minx, maxy-miny);
   worldScale = 6.0/Math.max(span,1);
 
-  // высота лифта пропорциональна масштабу диаграммы
+  // --- ЛИФТ: интерполяция между проходами (якоря ±H), БЕЗ гауссиан ---
+  // Старые гауссовы «горбы» шириной 4.5% длины ПЕРЕКРЫВАЛИСЬ на плотных рисунках
+  // (медианный зазор проходов бывает меньше ширины) и реализовывали часть
+  // пересечений в 3D ПЕРЕВЁРНУТЫМИ. Теперь: в каждом проходе z ТОЧНО ±H (якорь),
+  // между соседними проходами — плавная smoothstep-интерполяция. Перекрытие
+  // невозможно по построению.
   const H = 0.55;                       // мировые единицы
-  const wWidth = totalLen2D*0.045;      // ширина «горба» по дуге
-
-  // функция высоты z(s) от всех пересечений
+  const anchors=[];                     // {s, z} по всем проходам всех пересечений
+  for(const c of crossings){
+    const aOver = c.over==='A';
+    anchors.push({s:c.sA, z:aOver?+H:-H});
+    anchors.push({s:c.sB, z:aOver?-H:+H});
+  }
+  anchors.sort((a,b)=>a.s-b.s);
+  const nA=anchors.length;
   function zAt(s){
-    let z=0;
-    for(const c of crossings){
-      const aOver = c.over==='A';
-      const dA = arcDist(s,c.sA), dB=arcDist(s,c.sB);
-      const gA = Math.exp(-(dA*dA)/(wWidth*wWidth));
-      const gB = Math.exp(-(dB*dB)/(wWidth*wWidth));
-      z += (aOver? +H:-H)*gA + (aOver? -H:+H)*gB;
-    }
-    return z;
+    if(nA===0) return 0;
+    let i=0; while(i<nA && anchors[i].s<=s) i++;   // первый якорь строго после s
+    const prev=anchors[(i-1+nA)%nA], next=anchors[i%nA];
+    let ds=next.s-prev.s; if(ds<=0) ds+=totalLen2D;
+    let d=s-prev.s; if(d<0) d+=totalLen2D;
+    const u=Math.min(1,Math.max(0,ds>1e-9?d/ds:0));
+    const w=u*u*(3-2*u);                            // smoothstep
+    return prev.z+(next.z-prev.z)*w;
   }
 
   // число сегментов под длину рисунка (в мировом масштабе), затем буферы
   N = chooseN(totalLen2D*worldScale);
-  allocBuffers();
-  // ресэмплинг smooth до N равных по дуге вершин
-  verts=[];
+  // Позиции сэмплов: равномерная сетка + ТОЧНЫЕ позиции всех проходов.
+  // Вершина ложится ровно в каждый проход (z=±H точно), поэтому над/под каждого
+  // пересечения гарантированно верны в 3D-ломаной при любой плотности рисунка.
   const step=totalLen2D/N;
-  let si=0, acc=0;
-  const M=smooth.length;
-  // массив длин сегментов smooth
+  const aPos=anchors.map(a=>((a.s%totalLen2D)+totalLen2D)%totalLen2D).sort((x,y)=>x-y);
+  const pos=[];
   for(let k=0;k<N;k++){
-    const target=k*step;
-    // найдём положение target вдоль smooth
+    const s=k*step;
+    // сеточный сэмпл выбрасываем, если рядом (по дуге) есть якорь — якорь его заменит
+    let nearAnchor=false;
+    for(const a of aPos){ let d=Math.abs(a-s); d=Math.min(d,totalLen2D-d); if(d<0.35*step){nearAnchor=true;break;} }
+    if(!nearAnchor) pos.push(s);
+  }
+  for(const a of aPos) pos.push(a);
+  pos.sort((x,y)=>x-y);
+  for(let i=pos.length-1;i>0;i--) if(pos[i]-pos[i-1]<1e-9) pos.splice(i,1);  // точные дубли
+  N = pos.length;
+  allocBuffers();
+  verts=[];
+  let si=0;
+  const M=smooth.length;
+  for(const target of pos){
     while(si<M-1 && cumLen[si+1]<target) si++;
     const a=cumLen[si], b=(si+1<M)?cumLen[si+1]:totalLen2D;
     const t=(b-a>1e-6)?(target-a)/(b-a):0;
@@ -789,7 +825,38 @@ function relaxStep(){
     const m=Math.sqrt(dx*dx+dy*dy+dz*dz);
     if(m>maxStep){ const s=maxStep/m; verts[i].set(_p0x[i]+dx*s, _p0y[i]+dy*s, _p0z[i]+dz*s); }
   }
+  removeRigidRotation();                 // снять паразитный чистый поворот за шаг
   safetyClamp();
+}
+
+function removeRigidRotation(){
+  // Численный цикл (изгиб↔масштаб↔ресэмплинг) на несимметричной форме создаёт
+  // крошечный ЧИСТЫЙ ПОВОРОТ всего узла за шаг. Поворот — мода нулевой энергии
+  // (энергию не меняет), у градиентного спуска нет возвращающей силы против него,
+  // поэтому он накапливается в вечное видимое вращение. Убираем его точно:
+  // ω = Σ r×d / Σ|r|² по смещениям шага, затем обратный поворот Родригеса на |ω|.
+  let cx=0,cy=0,cz=0; for(const v of verts){cx+=v.x;cy+=v.y;cz+=v.z;} cx/=N;cy/=N;cz/=N;
+  let ox=0,oy=0,oz=0,rr=0;
+  for(let i=0;i<N;i++){
+    const rx=verts[i].x-cx, ry=verts[i].y-cy, rz=verts[i].z-cz;
+    const dx=verts[i].x-_p0x[i], dy=verts[i].y-_p0y[i], dz=verts[i].z-_p0z[i];
+    ox+=ry*dz-rz*dy; oy+=rz*dx-rx*dz; oz+=rx*dy-ry*dx;
+    rr+=rx*rx+ry*ry+rz*rz;
+  }
+  if(rr<1e-12) return;
+  ox/=rr; oy/=rr; oz/=rr;
+  const th=Math.hypot(ox,oy,oz);
+  if(th<1e-12) return;
+  const ux=ox/th, uy=oy/th, uz=oz/th, c=Math.cos(th), s=Math.sin(th), mc=1-c;
+  for(const v of verts){
+    const px=v.x-cx, py=v.y-cy, pz=v.z-cz;
+    // R(−θ)p = p·cosθ − (u×p)·sinθ + u(u·p)(1−cosθ)
+    const crx=uy*pz-uz*py, cry=uz*px-ux*pz, crz=ux*py-uy*px;
+    const dot=ux*px+uy*py+uz*pz;
+    v.x=cx + px*c - crx*s + ux*dot*mc;
+    v.y=cy + py*c - cry*s + uy*dot*mc;
+    v.z=cz + pz*c - crz*s + uz*dot*mc;
+  }
 }
 
 /* ============================================================================
@@ -996,14 +1063,39 @@ function animate(){
       if(settleCount>20){ stopPhysics('тривиальный узел → окружность'); }
       else setStatus('раскручивание… разброс '+rv.toFixed(1)+'%');
     } else {
-      // НАСТОЯЩИЙ узел: гладкая объёмная (каноническая) форма
-      if(settleCount>25){ stopPhysics('равновесие достигнуто'); }
+      // НАСТОЯЩИЙ узел: гладкая объёмная (каноническая) форма.
+      // Равновесие объявляем ЛИБО по затуханию движения вершин, ЛИБО по
+      // сходимости ФОРМЫ: остаточное тангенциальное скольжение точек вдоль
+      // неподвижной кривой (репараметризация — движение нулевой энергии) не
+      // должно бесконечно держать статус «релаксация».
+      if(shapeStable()){ shapeStableCount++; } else shapeStableCount=0;
+      if(settleCount>25 || shapeStableCount>30){ stopPhysics('равновесие достигнуто'); }
       else setStatus('релаксация… Δ='+maxMove.toExponential(1));
     }
   }
   controls.target.set(0,0,0);          // центр вращения фиксирован в начале координат
   controls.update();
   renderer.render(scene,camera);
+}
+
+// «форма стабильна» — инвариантные к повороту/репараметризации метрики (энергия
+// изгиба, макс. кривизна, разброс радиуса) не меняются между кадрами.
+let shapeStableCount=0, _prevBendE=NaN, _prevMaxC=NaN, _prevRvar=NaN;
+function shapeStable(){
+  let maxC=0, bendE=0;
+  for(let i=0;i<N;i++){ const im=(i-1+N)%N, ip=(i+1)%N;
+    const ax=verts[i].x-verts[im].x, ay=verts[i].y-verts[im].y, az=verts[i].z-verts[im].z;
+    const bx=verts[ip].x-verts[i].x, by=verts[ip].y-verts[i].y, bz=verts[ip].z-verts[i].z;
+    const nx=ay*bz-az*by, ny=az*bx-ax*bz, nz=ax*by-ay*bx;
+    const th=Math.atan2(Math.hypot(nx,ny,nz), ax*bx+ay*by+az*bz);
+    if(th>maxC)maxC=th; bendE+=th*th; }
+  const rv=curveRvar();
+  const ok = isFinite(_prevBendE) &&
+    Math.abs(bendE-_prevBendE) < 1e-5*Math.max(1,bendE) &&
+    Math.abs(maxC-_prevMaxC)   < 1e-4 &&
+    Math.abs(rv-_prevRvar)     < 0.004;
+  _prevBendE=bendE; _prevMaxC=maxC; _prevRvar=rv;
+  return ok;
 }
 
 function stepAndMeasure(){
@@ -1016,7 +1108,7 @@ function stepAndMeasure(){
 let physPhase=1;
 function startPhysics(){
   if(!verts.length) return;
-  running=true; settleCount=0; telem=[];   // новая запись телеметрии на каждый запуск
+  running=true; settleCount=0; shapeStableCount=0; _prevBendE=NaN; telem=[];
   // ТИП УЗЛА берём из определителя диаграммы (топологически точно, не путается со
   // скручиванием/writhe): =1 → тривиальный (фаза 1, распускаем в круг); >1 → узел
   // (фаза 2, отталкивание раскрывает в каноническую форму).
