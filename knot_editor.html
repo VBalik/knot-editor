@@ -142,6 +142,7 @@
       <span class="tsep"></span>
       <button id="play" class="go">▶ Физика</button>
       <button id="exportObj" class="ghost">⬇ OBJ</button>
+      <button id="exportTelem" class="ghost" title="Выгрузить телеметрию релаксации для диагностики">⬇ Телеметрия</button>
       <span class="tspacer"></span>
       <span class="statuspill" id="statusPill"><span class="dot"></span><span id="status">ожидание узла…</span></span>
     </div>
@@ -919,12 +920,69 @@ function fitCamera(keepDir){
 }
 
 let running=false;
+/* ============================================================================
+   ТЕЛЕМЕТРИЯ — запись метрик по кадрам + выгрузка JSON для диагностики
+   «зависающих» случаев (вращение, стягивание в узелки, дрожание).
+   ========================================================================== */
+let telem=[];
+function knotDiagnostics(){
+  let cx=0,cy=0,cz=0; for(const v of verts){cx+=v.x;cy+=v.y;cz+=v.z;} cx/=N;cy/=N;cz/=N;
+  let maxC=0,sumC=0,energy=0;                       // кривизна и энергия изгиба
+  for(let i=0;i<N;i++){ const im=(i-1+N)%N, ip=(i+1)%N;
+    const ax=verts[i].x-verts[im].x,ay=verts[i].y-verts[im].y,az=verts[i].z-verts[im].z;
+    const bx=verts[ip].x-verts[i].x,by=verts[ip].y-verts[i].y,bz=verts[ip].z-verts[i].z;
+    const nx=ay*bz-az*by,ny=az*bx-ax*bz,nz=ax*by-ay*bx;
+    const th=Math.atan2(Math.hypot(nx,ny,nz), ax*bx+ay*by+az*bz);
+    if(th>maxC)maxC=th; sumC+=th; energy+=th*th; }
+  let minSeg=Infinity;                              // мин. зазор между прядями (стягивание)
+  for(let i=0;i<N;i++){ const ip=(i+1)%N;
+    for(let j=i+1;j<N;j++){ const jp=(j+1)%N; const cd=Math.min(j-i,N-(j-i)); if(cd<=3) continue;
+      const d=_closestSeg(verts[i],verts[ip],verts[j],verts[jp]).dist; if(d<minSeg)minSeg=d; } }
+  return {cx,cy,cz, maxCurv:maxC, meanCurv:sumC/N, bendEnergy:energy, minSegL0:minSeg/L0, rvar:curveRvar()};
+}
+function recordTelemetry(maxMove, pre){
+  const d=knotDiagnostics();
+  // угловая скорость всего узла (вращение):  ω = |Σ r×v| / Σ|r|²
+  let ox=0,oy=0,oz=0,rr=0;
+  for(let i=0;i<N;i++){ const rx=verts[i].x-d.cx,ry=verts[i].y-d.cy,rz=verts[i].z-d.cz;
+    const vx=verts[i].x-pre[i].x,vy=verts[i].y-pre[i].y,vz=verts[i].z-pre[i].z;
+    ox+=ry*vz-rz*vy; oy+=rz*vx-rx*vz; oz+=rx*vy-ry*vx; rr+=rx*rx+ry*ry+rz*rz; }
+  const omega=rr>1e-9?Math.hypot(ox,oy,oz)/rr:0;
+  telem.push({ maxMove:+(maxMove/L0).toFixed(5), omega:+omega.toFixed(5), minSegL0:+d.minSegL0.toFixed(3),
+    maxCurv:+d.maxCurv.toFixed(3), bendEnergy:+d.bendEnergy.toFixed(2), rvar:+d.rvar.toFixed(2),
+    drift:+(Math.hypot(d.cx,d.cy,d.cz)/L0).toFixed(4) });
+  if(telem.length>400) telem.shift();
+}
+function exportTelemetry(){
+  if(!verts.length){ setStatus('сначала постройте узел'); return; }
+  const d=knotDiagnostics();
+  const data={
+    meta:{ when:new Date().toISOString(), N, L0:+L0.toFixed(5), tubeRadius,
+      bendCoef, bendPow, repCoef, repPow, physPhase, isUnknot, knotDet, running,
+      note:'узел «зависает»: вращение + стягивание в узелки + дрожание' },
+    now:{ maxCurv:+d.maxCurv.toFixed(3), minSegL0:+d.minSegL0.toFixed(3),
+      bendEnergy:+d.bendEnergy.toFixed(2), rvar:+d.rvar.toFixed(2) },
+    verts: verts.map(v=>[+v.x.toFixed(4),+v.y.toFixed(4),+v.z.toFixed(4)]),
+    diagram:{ totalLen2D:+totalLen2D.toFixed(1),
+      crossings: crossings.map(c=>({sA:+c.sA.toFixed(2), sB:+c.sB.toFixed(2), over:c.over})),
+      smooth: smooth.map(p=>[Math.round(p.x),Math.round(p.y)]) },
+    series: telem
+  };
+  const blob=new Blob([JSON.stringify(data)],{type:'application/json'});
+  const url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download='knot-telemetry.json'; document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  setStatus('телеметрия сохранена ('+telem.length+' кадров) → пришлите файл');
+}
+
 const STEPS_PER_FRAME=6;   // несколько шагов релаксации за кадр → быстрее к равновесию
 function animate(){
   requestAnimationFrame(animate);
   if(running && verts.length){
+    const pre=verts.map(v=>v.clone());               // кадр «до» — для скорости/вращения
     let maxMove=0;
     for(let k=0;k<STEPS_PER_FRAME;k++) maxMove=stepAndMeasure();   // несколько шагов за кадр
+    recordTelemetry(maxMove, pre);                   // запись метрик кадра
     rebuildTube();
     const settleEps=0.0025*L0;
     if(maxMove<settleEps){ settleCount++; } else settleCount=0;
@@ -958,7 +1016,7 @@ function stepAndMeasure(){
 let physPhase=1;
 function startPhysics(){
   if(!verts.length) return;
-  running=true; settleCount=0;
+  running=true; settleCount=0; telem=[];   // новая запись телеметрии на каждый запуск
   // ТИП УЗЛА берём из определителя диаграммы (топологически точно, не путается со
   // скручиванием/writhe): =1 → тривиальный (фаза 1, распускаем в круг); >1 → узел
   // (фаза 2, отталкивание раскрывает в каноническую форму).
@@ -1006,6 +1064,7 @@ function exportOBJ(){
   setStatus('OBJ сохранён ('+pos.count+' вершин)');
 }
 document.getElementById('exportObj').onclick=exportOBJ;
+document.getElementById('exportTelem').onclick=exportTelemetry;
 
 window.addEventListener('resize', fitCanvas);
 
