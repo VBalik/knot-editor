@@ -138,8 +138,8 @@
       <span class="chip">Цвет <input type="color" id="color" value="#5ad1c7"></span>
       <span class="chip">Толщина <input type="range" id="thick" min="0.03" max="0.22" step="0.005" value="0.10"><b id="thickVal">0.10</b></span>
       <span class="tsep"></span>
-      <span class="chip">Распрямление <input type="range" id="bendCoef" min="0" max="10" step="1" value="5"><b id="bendVal">5</b></span>
-      <span class="chip">Самоотталкивание <input type="range" id="repCoef" min="0" max="10" step="1" value="5"><b id="repVal">5</b></span>
+      <span class="chip">Распрямление <input type="range" id="bendCoef" min="0" max="30" step="1" value="5"><b id="bendVal">5</b></span>
+      <span class="chip">Самоотталкивание <input type="range" id="repCoef" min="0" max="20" step="1" value="5"><b id="repVal">5</b></span>
       <span class="tsep"></span>
       <button id="play" class="go">▶ Физика</button>
       <button id="exportObj" class="ghost">⬇ OBJ</button>
@@ -808,8 +808,14 @@ function relaxStep(){
   for(let i=0;i<N;i++){ _p0x[i]=verts[i].x; _p0y[i]=verts[i].y; _p0z[i]=verts[i].z; }
   // 1) распрямление, ЧЕРЕДУЯ с непроникновением: коллизия гасит большой сдвиг сразу,
   //    поэтому струна не «протягивается» тоньше своей толщины (нет тугого узелка).
-  const alpha=Math.min(0.33, bendCoef*0.05);
-  for(let p=0;p<4;p++){ bendingPass(alpha); segCollide(2); }
+  //    Жёсткость = суммарная доза сглаживания T за шаг. Каждый отдельный проход
+  //    ограничен α≤0.33 (предел устойчивости Якоби-сглаживания), поэтому большая
+  //    жёсткость реализуется БОЛЬШИМ ЧИСЛОМ проходов, а не опасно-крупным α.
+  //    При bendCoef=5 это в точности прежние 4 прохода по α=0.25.
+  const T=bendCoef*0.20;                       // суммарная «доза» распрямления
+  const k=Math.max(1, Math.min(20, Math.ceil(T/0.33)));
+  const alpha=T/k;
+  for(let p=0;p<k;p++){ bendingPass(alpha); segCollide(2); }
   // 2) отталкивание — только в фазе 2 (раскрытие настоящего узла)
   if(physRepOn) repulsionForce();
   // 3) равномерность по дуге + постоянная длина
