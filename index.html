@@ -355,12 +355,14 @@ function renderDraw(){
   // Разрыв и верхний сегмент идут ВДОЛЬ настоящей кривой → без ложных изломов.
   if(closedCurve && crossings.length){
     const curveCol='#7fd7ff';
-    const GAP=13;      // полудлина разрыва нижней пряди (по дуге)
-    const OVER=17;     // полудлина восстановления верхней пряди (чуть больше разрыва)
+    // разрыв целиком ВНУТРИ серого кольца-хендла (r=14): полудлина стирания +
+    // полуширина стирающего штриха с круглым торцом = 8 + 4.5 ≈ 12.5 < 14
+    const GAP=8;       // полудлина разрыва нижней пряди (по дуге)
+    const OVER=14;     // полудлина восстановления верхней пряди (перекрывает стирание)
     // проход 1 — стираем нижние пряди всех пересечений (до прозрачного фона)
     dctx.save();
     dctx.globalCompositeOperation='destination-out';
-    dctx.lineCap='round'; dctx.lineWidth=CURVE_W+6;
+    dctx.lineCap='round'; dctx.lineWidth=CURVE_W+4;
     for(const c of crossings){ const sUnder = c.over==='A'?c.sB:c.sA; strokeSpanOn(sUnder,GAP); }
     dctx.restore();
     // проход 2 — поверх рисуем верхние пряди (сплошные)
