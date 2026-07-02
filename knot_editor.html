@@ -21,37 +21,42 @@
     display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .head h1{font-size:13px;margin:0;font-weight:600;letter-spacing:.2px}
   .head .hint{color:var(--muted);font-size:12px}
-  /* ---- единый верхний тулбар (одинаковый стиль в обоих окнах) ---- */
-  .topbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;
-    padding:9px 15px;min-height:56px;
-    background:linear-gradient(180deg,#1b222e,#141922);
-    border-bottom:1px solid var(--line);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.03), 0 10px 20px -16px #000}
-  .step{display:flex;align-items:center;gap:10px;white-space:nowrap;margin-right:3px}
-  .step .num{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;
-    font-size:13px;font-weight:700;color:#06231f;
-    background:linear-gradient(180deg,#74e2d8,#37bcb2);
-    box-shadow:0 2px 8px -1px rgba(90,209,199,.55)}
-  .step .ttl{font-size:13.5px;font-weight:650;letter-spacing:.2px}
-  .tsep{width:1px;height:26px;background:var(--line);flex:none;margin:0 3px}
-  .tspacer{flex:1 1 10px}
-  .tlabel{font-size:12px;color:var(--muted);white-space:nowrap}
-  .chip{display:inline-flex;align-items:center;gap:9px;height:37px;padding:0 12px;
-    background:rgba(255,255,255,.035);border:1px solid var(--line);border-radius:10px;
-    font-size:12px;color:var(--muted);white-space:nowrap;transition:border-color .12s,background .12s}
-  .chip:hover{border-color:#3a4554;background:rgba(255,255,255,.05)}
-  .chip b{color:var(--accent);font-weight:600;font-variant-numeric:tabular-nums;min-width:26px;text-align:right}
-  .chip input[type=range]{width:84px}
-  .chip input[type=color]{width:30px;height:22px}
-  .seg{display:inline-flex;height:37px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-  .seg button{height:100%;border:none;border-left:1px solid var(--line);border-radius:0;
-    background:#1e2632;padding:0 13px;font-weight:600;min-width:44px;justify-content:center}
+  /* ---- единый верхний тулбар: одна строка, одинаковая высота слева и справа ---- */
+  .topbar{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;overflow:hidden;
+    height:50px;padding:0 10px;
+    background:linear-gradient(180deg,#1c2430,#141922);
+    border-bottom:1px solid #2e3745;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.04), 0 8px 18px -14px #000}
+  .tspacer{flex:1 1 6px}
+  .chip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 9px;flex:none;
+    background:rgba(255,255,255,.04);border:1px solid #2e3745;border-radius:9px;
+    font-size:11.5px;color:var(--muted);white-space:nowrap;transition:border-color .12s,background .12s}
+  .chip:hover{border-color:#3d4a5c;background:rgba(255,255,255,.06)}
+  .chip b{color:var(--accent);font-weight:650;font-variant-numeric:tabular-nums;min-width:18px;text-align:right}
+  .chip input[type=range]{width:50px;margin:0}
+  .chip input[type=color]{width:26px;height:20px}
+  .seg{display:inline-flex;height:32px;border:1px solid #2e3745;border-radius:9px;overflow:hidden;flex:none}
+  .seg button{height:100%;border:none;border-left:1px solid #2e3745;border-radius:0;
+    background:#1e2632;padding:0 10px;font-weight:600;font-size:12px;min-width:36px;justify-content:center}
   .seg button:first-child{border-left:none}
-  .seg button:hover{background:#2b3543}
-  .hint{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40ch}
-  .statuspill{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 13px;
-    background:rgba(255,255,255,.035);border:1px solid var(--line);border-radius:999px;
-    font-size:12px;color:var(--muted);white-space:nowrap}
+  .seg button:hover{background:#2c3746}
+  .hint{font-size:11.5px;color:#6d7a8c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    flex:0 1 auto;min-width:0}
+  /* статус — плашка в правом нижнем углу 3D-окна */
+  .statuspill{position:absolute;right:12px;bottom:12px;z-index:6;
+    display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;
+    background:rgba(17,22,30,.85);border:1px solid #2e3745;border-radius:999px;
+    font-size:12px;color:var(--muted);white-space:nowrap;backdrop-filter:blur(6px);
+    box-shadow:0 6px 18px -6px rgba(0,0,0,.5)}
+  /* узкие окна: тулбар остаётся одной строкой */
+  @media (max-width:1240px){
+    .topbar{gap:4px;padding:0 8px}
+    .chip{padding:0 7px;gap:5px}
+    .chip input[type=range]{width:36px}
+    #thickVal{display:none}
+    button.go{padding:0 9px}
+    button.ghost{padding:0 6px}
+  }
   .statuspill .dot{width:7px;height:7px;border-radius:50%;background:#556173;flex:none;transition:background .2s}
   .statuspill.run{color:var(--txt)}
   .statuspill.run .dot{background:var(--accent2);animation:pulse 1.1s infinite}
@@ -65,9 +70,9 @@
   #gl{position:absolute;inset:0;display:block}
   .toolbar{padding:10px 14px;border-top:1px solid var(--line);background:var(--panel);
     display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  button{background:#232b38;color:var(--txt);border:1px solid var(--line);
-    height:37px;padding:0 15px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:550;
-    display:inline-flex;align-items:center;gap:6px;
+  button{background:#232b38;color:var(--txt);border:1px solid #2e3745;flex:none;
+    height:32px;padding:0 11px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:550;
+    display:inline-flex;align-items:center;gap:5px;
     transition:background .12s,border-color .12s,transform .05s,filter .12s}
   button:hover{background:#2b3543;border-color:#3a4554}
   button:active{transform:translateY(1px)}
@@ -76,7 +81,7 @@
   button.go{background:linear-gradient(180deg,#f8b44e,#ef971a);color:#2a1c00;
     border-color:#e08e12;font-weight:700;box-shadow:0 3px 11px -3px rgba(245,166,35,.6)}
   button.go:hover{filter:brightness(1.06);background:linear-gradient(180deg,#ffbe5c,#f5a123)}
-  button.ghost{background:transparent;color:var(--muted)}
+  button.ghost{background:transparent;color:var(--muted);padding:0 8px}
   button.ghost:hover{background:rgba(255,255,255,.055);color:var(--txt)}
   button:disabled{opacity:.4;cursor:not-allowed}
   .ctrls{position:absolute;top:12px;right:12px;width:210px;background:rgba(20,25,33,.92);
@@ -110,20 +115,17 @@
   <!-- ================= LEFT: 2D drawing ================= -->
   <div id="left" class="pane">
     <div class="topbar">
-      <span class="step"><span class="num">1</span><span class="ttl">Узел</span></span>
       <button id="clear" class="ghost">Очистить</button>
-      <span class="tsep"></span>
-      <span class="tlabel">Примеры</span>
-      <span class="seg">
+      <span class="seg" title="Примеры узлов">
         <button class="ex" data-knot="trefoil" title="Трилистник 3₁">3₁</button>
         <button class="ex" data-knot="figure8" title="Восьмёрка 4₁">4₁</button>
         <button class="ex" data-knot="cinquefoil" title="Пятилистник 5₁">5₁</button>
         <button class="ex" data-knot="septafoil" title="Семилистник 7₁">7₁</button>
       </span>
-      <span class="chip" id="crossInfo">пересечений <b>0</b></span>
+      <span class="chip" id="crossInfo" title="Число самопересечений диаграммы">×<b>0</b></span>
       <span class="chip" id="knotType" title="Определитель диаграммы: 1 — тривиальный узел (распрямится в окружность)">тип <b>—</b></span>
       <span class="tspacer"></span>
-      <span class="hint" id="hint">Ведите мышью, вернитесь в старт · кликайте пересечения — над/под</span>
+      <span class="hint" id="hint">Ведите мышью, вернитесь в старт · клик по пересечению — над/под</span>
     </div>
     <div class="stagewrap">
       <canvas id="draw"></canvas>
@@ -133,22 +135,18 @@
   <!-- ================= RIGHT: 3D view ================= -->
   <div id="right" class="pane">
     <div class="topbar">
-      <span class="step"><span class="num">2</span><span class="ttl">3D-узел</span></span>
-      <span class="tsep"></span>
-      <span class="chip">Цвет <input type="color" id="color" value="#5ad1c7"></span>
-      <span class="chip">Толщина <input type="range" id="thick" min="0.03" max="0.22" step="0.005" value="0.10"><b id="thickVal">0.10</b></span>
-      <span class="tsep"></span>
-      <span class="chip">Распрямление <input type="range" id="bendCoef" min="0" max="30" step="1" value="5"><b id="bendVal">5</b></span>
-      <span class="chip">Самоотталкивание <input type="range" id="repCoef" min="0" max="20" step="1" value="5"><b id="repVal">5</b></span>
-      <span class="tsep"></span>
+      <span class="chip" title="Цвет трубки"><input type="color" id="color" value="#5ad1c7"></span>
+      <span class="chip" title="Толщина трубки">⌀ <input type="range" id="thick" min="0.03" max="0.22" step="0.005" value="0.10"><b id="thickVal">0.10</b></span>
+      <span class="chip" title="Жёсткость распрямления (скорость выпрямления струны)">Жёстк. <input type="range" id="bendCoef" min="0" max="30" step="1" value="5"><b id="bendVal">5</b></span>
+      <span class="chip" title="Самоотталкивание струны (раздувание узла)">Отталк. <input type="range" id="repCoef" min="0" max="20" step="1" value="5"><b id="repVal">5</b></span>
       <button id="play" class="go">▶ Физика</button>
-      <button id="exportObj" class="ghost">⬇ OBJ</button>
-      <button id="exportTelem" class="ghost" title="Выгрузить телеметрию релаксации для диагностики">⬇ Телеметрия</button>
+      <button id="exportObj" class="ghost" title="Экспорт 3D-модели в OBJ">OBJ</button>
+      <button id="exportTelem" class="ghost" title="Выгрузить телеметрию релаксации для диагностики">Телем</button>
       <span class="tspacer"></span>
-      <span class="statuspill" id="statusPill"><span class="dot"></span><span id="status">ожидание узла…</span></span>
     </div>
     <div class="stagewrap">
       <canvas id="gl"></canvas>
+      <span class="statuspill" id="statusPill"><span class="dot"></span><span id="status">ожидание узла…</span></span>
     </div>
   </div>
 </div>
@@ -305,7 +303,7 @@ function tryToggleCrossing(p){
   }
 }
 function updateCrossInfo(){
-  document.getElementById('crossInfo').innerHTML='пересечений <b>'+crossings.length+'</b>';
+  document.getElementById('crossInfo').innerHTML='×<b>'+crossings.length+'</b>';
 }
 const CURVE_W = 5;   // толщина пряди в 2D-диаграмме
 
@@ -1148,10 +1146,10 @@ function stepAndMeasure(){
   return m;
 }
 
-let physPhase=1;
+let physPhase=1, physEverRun=false;
 function startPhysics(){
   if(!verts.length) return;
-  running=true; settleCount=0; shapeStableCount=0; _prevBendE=NaN; telem=[];
+  running=true; physEverRun=true; settleCount=0; shapeStableCount=0; _prevBendE=NaN; telem=[];
   // ТИП УЗЛА берём из определителя диаграммы (топологически точно, не путается со
   // скручиванием/writhe): =1 → тривиальный (фаза 1, распускаем в круг); >1 → узел
   // (фаза 2, отталкивание раскрывает в каноническую форму).
@@ -1177,8 +1175,14 @@ document.getElementById('play').onclick=()=>{ running?stopPhysics(''):startPhysi
 
 const bendCoefEl=document.getElementById('bendCoef'), repCoefEl=document.getElementById('repCoef');
 const thick=document.getElementById('thick'), color=document.getElementById('color');
-bendCoefEl.oninput=()=>{ bendCoef=+bendCoefEl.value; document.getElementById('bendVal').textContent=bendCoefEl.value; };
-repCoefEl.oninput =()=>{ repCoef=+repCoefEl.value;  document.getElementById('repVal').textContent=repCoefEl.value; };
+// Смена регулировки после достигнутого равновесия перезапускает релаксацию до
+// нового равновесия; во время работы — сбрасывает счётчики покоя (новые силы).
+function physSettingsChanged(){
+  if(running){ settleCount=0; shapeStableCount=0; _prevBendE=NaN; }
+  else if(physEverRun && closedCurve && verts.length) startPhysics();
+}
+bendCoefEl.oninput=()=>{ bendCoef=+bendCoefEl.value; document.getElementById('bendVal').textContent=bendCoefEl.value; physSettingsChanged(); };
+repCoefEl.oninput =()=>{ repCoef=+repCoefEl.value;  document.getElementById('repVal').textContent=repCoefEl.value; physSettingsChanged(); };
 thick.oninput=()=>{ tubeRadius=+thick.value; document.getElementById('thickVal').textContent=(+thick.value).toFixed(2); rebuildTube(); };
 color.oninput=()=>{ tubeColor=color.value; tubeMat.color.set(tubeColor);
   tubeMat.emissive=new THREE.Color(tubeColor).multiplyScalar(EMISSIVE_K); };
