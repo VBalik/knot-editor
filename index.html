@@ -627,28 +627,8 @@ function minSegGap(){
    80% дистанции → пересечение исключено ПО ПОСТРОЕНИЮ. Именно нелимитированные
    сдвиги коллизии (расталкивая одну пару — вдавливала вершины в третью прядь)
    и срез углов ресэмплинга раньше «туннелировали» узел сквозь себя. */
-function computeClearances(){
-  for(let i=0;i<N;i++) _clr[i]=Infinity;
-  for(let i=0;i<N;i++){ const ip=(i+1)%N;
-    for(let j=i+1;j<N;j++){ const jp=(j+1)%N;
-      const cd=Math.min((j-i),(N-(j-i))); if(cd<=2) continue;
-      const d=_closestSeg(verts[i],verts[ip],verts[j],verts[jp]).dist;
-      if(d<_clr[i])_clr[i]=d; if(d<_clr[ip])_clr[ip]=d;
-      if(d<_clr[j])_clr[j]=d; if(d<_clr[jp])_clr[jp]=d;
-    }
-  }
-}
 function snapshotQ(){
   for(let i=0;i<N;i++){ _qx[i]=verts[i].x; _qy[i]=verts[i].y; _qz[i]=verts[i].z; }
-}
-function clampToBudget(){
-  const F=0.4;
-  for(let i=0;i<N;i++){
-    const lim=F*_clr[i]; if(!isFinite(lim)) continue;
-    const dx=verts[i].x-_qx[i], dy=verts[i].y-_qy[i], dz=verts[i].z-_qz[i];
-    const m=Math.sqrt(dx*dx+dy*dy+dz*dz);
-    if(m>lim){ const s=lim/m; verts[i].set(_qx[i]+dx*s, _qy[i]+dy*s, _qz[i]+dz*s); }
-  }
 }
 
 function recenter(){
@@ -676,71 +656,8 @@ let bendCoef=5, bendPow=2, repCoef=5, repPow=2;   // задаются ползу
 const SKIP = 3;              // соседи по дуге для ЖЁСТКОГО зазора (топология)
 let settleCount=0;
 
-function bendingPass(alpha, cap){
-  // Сила РАСПРЯМЛЕНИЯ стыка: направление — к хорде (лапласиан = уменьшение угла
-  // между соседними сегментами), величина растёт как степень угла:
-  //   |смещение| ∝ угол^(bendPow−1).
-  // Т.к. |лапласиан| ∝ углу, домножаем на (|лапл|/L0)^(bendPow−2): при bendPow=2
-  // это чистое сглаживание кривизны (→ точная окружность для петли), при 3 и 4
-  // острые изгибы распрямляются гораздо сильнее пологих → кривизна раскладывается
-  // ровно по всему узлу. Якоби (сначала все лапласианы, потом сдвиг) → без волн.
-  for(let i=0;i<N;i++){
-    const a=verts[(i-1+N)%N], b=verts[(i+1)%N], p=verts[i];
-    _dispx[i]=0.5*(a.x+b.x)-p.x; _dispy[i]=0.5*(a.y+b.y)-p.y; _dispz[i]=0.5*(a.z+b.z)-p.z;
-  }
-  for(let i=0;i<N;i++){
-    const m=Math.sqrt(_dispx[i]*_dispx[i]+_dispy[i]*_dispy[i]+_dispz[i]*_dispz[i]);
-    if(m<1e-12) continue;
-    let w=alpha*Math.pow(m/L0, bendPow-2);
-    // cap — анти-туннельный предел НА ОДИН проход (45% текущего зазора прядей):
-    // без него при большой жёсткости изгиб продавливал прядь сквозь прядь МЕЖДУ
-    // коллизионными проходами (топология менялась, det узла деградировал).
-    if(cap!==undefined && w*m>cap) w=cap/m;
-    verts[i].x+=w*_dispx[i]; verts[i].y+=w*_dispy[i]; verts[i].z+=w*_dispz[i];
-  }
-}
 
 const REP_BASE=0.28;   // СОБСТВЕННАЯ толщина струны: самоотталкивание есть всегда,
-                       // даже при ползунке 0 — реальная упругая проволока не может
-                       // стянуться в точку, она сама себя отталкивает. Поэтому узел
-                       // НИКОГДА не затягивается в тугой узелок, а держит гладкую,
-                       // распрямлённую (каноническую) форму. Ползунок добавляет сверху.
-function repulsionForce(scale, cap){
-  // Самоотталкивание сегментов: |F| ~ (база+repCoef)·(L0/d)^repPow (repPow=2/3),
-  // только между далёкими по дуге прядями (соседей пропускаем — иначе распирало
-  // бы прямые участки). Раздувает узел в объёмную форму и держит пряди врозь.
-  // Якоби (накопить → ограничить → сдвинуть). Для НЕзапутанной петли не зовётся.
-  // scale — дозировка на ОДИН проход: отталкивание идёт в одном цикле с изгибом
-  // и в той же пропорции, поэтому изгиб не может перевесить его ни при каких
-  // положениях ползунков (иначе узловая область стягивалась бы в тугой узелок).
-  const skip=Math.max(SKIP+1, Math.round(N*0.08));
-  // Шкала отталкивания: до 10 линейно (дефолт не меняется), выше — сжата
-  // (10→1.18 … 20→1.48): на плотных клубках сильное дальнее отталкивание с
-  // противоположных сторон создаёт ВНУТРЕННЕЕ давление и вжимает соседние
-  // пряди в затор. Верх ползунка осмыслен, но в стабильной зоне.
-  const cBase = repCoef<=10 ? REP_BASE + repCoef*0.09 : REP_BASE + 0.9 + (repCoef-10)*0.03;
-  const c=cBase*(scale===undefined?1:scale);
-  const maxMove=(cap===undefined)?0.30*L0:Math.min(0.30*L0, cap);   // анти-туннель на проход
-  for(let i=0;i<N;i++){ _dispx[i]=0;_dispy[i]=0;_dispz[i]=0; }
-  for(let i=0;i<N;i++){
-    const pix=verts[i].x, piy=verts[i].y, piz=verts[i].z;
-    for(let j=i+1;j<N;j++){
-      const cd=Math.min((j-i),(N-(j-i)));
-      if(cd<=skip) continue;
-      const dx=pix-verts[j].x, dy=piy-verts[j].y, dz=piz-verts[j].z;
-      let d2=dx*dx+dy*dy+dz*dz; if(d2<1e-12) d2=1e-12;
-      const d=Math.sqrt(d2);
-      const f=c*Math.pow(L0/d, repPow)/d;   // |смещение|=c·(L0/d)^repPow; вектор = f·r
-      _dispx[i]+=f*dx; _dispy[i]+=f*dy; _dispz[i]+=f*dz;
-      _dispx[j]-=f*dx; _dispy[j]-=f*dy; _dispz[j]-=f*dz;
-    }
-  }
-  for(let i=0;i<N;i++){
-    const m=Math.sqrt(_dispx[i]*_dispx[i]+_dispy[i]*_dispy[i]+_dispz[i]*_dispz[i]);
-    const s=m>maxMove?maxMove/m:1;
-    verts[i].x+=_dispx[i]*s; verts[i].y+=_dispy[i]*s; verts[i].z+=_dispz[i]*s;
-  }
-}
 
 // ---- САМОНЕПРОНИКНОВЕНИЕ по ОТРЕЗКАМ (сегмент-сегмент) ----
 // Настоящая толщина струны: меряем реальное расстояние между отрезками (а не
@@ -838,121 +755,214 @@ function planarizePass(alpha){
   for(const v of verts){ const d=(v.x-cx)*nx+(v.y-cy)*ny+(v.z-cz)*nz;
     v.x-=alpha*d*nx; v.y-=alpha*d*ny; v.z-=alpha*d*nz; }
 }
-function rescaleToTarget(){
-  // ПОСТОЯННАЯ полная длина узла = N·L0 (п.6). Однородный масштаб не искажает
-  // форму, но даёт «дыхание»: сила изгиба слегка ужимает кривую, а масштаб
-  // возвращает размер — так распрямление идёт до конца (петля → ровный круг),
-  // при этом узел не схлопывается и не раздувается.
-  let tl=0; for(let i=0;i<N;i++) tl+=verts[i].distanceTo(verts[(i+1)%N]);
-  if(isFinite(tl) && tl>1e-6){ const f=(N*L0)/tl; for(const v of verts) v.multiplyScalar(f); }
-}
-function resampleUniform(){
-  // равномерно по длине дуги: сегменты одинаковой длины (жёсткие, п.6) + точки
-  // могут скользить ВДОЛЬ кривой к своим местам — без этого распрямление
-  // «застревает» на не-круге. Скольжение вдоль кривой топологию не меняет.
-  const cum=[0]; let L=0;
-  for(let i=1;i<=N;i++){ L+=verts[i%N].distanceTo(verts[i-1]); cum.push(L); }
-  if(!isFinite(L) || L<1e-6) return;
-  const step=L/N; let seg=0;
-  const ox=new Float64Array(N), oy=new Float64Array(N), oz=new Float64Array(N);
-  for(let k=0;k<N;k++){
-    const tg=k*step;
-    while(seg<N-1 && cum[seg+1]<tg) seg++;
-    const a=cum[seg], b=cum[seg+1], t=(b-a>1e-9)?(tg-a)/(b-a):0;
-    const p0=verts[seg], p1=verts[(seg+1)%N];
-    ox[k]=p0.x+(p1.x-p0.x)*t; oy[k]=p0.y+(p1.y-p0.y)*t; oz[k]=p0.z+(p1.z-p0.z)*t;
-  }
-  for(let i=0;i<N;i++) verts[i].set(ox[i], oy[i], oz[i]);
-}
 
 // Фаза релаксации: false — только распрямление+само-непроникновение (тривиальная
 // петля свободно распускается в ОКРУЖНОСТЬ; настоящий узел лишь сплющивается, но
 // не развязывается). true — добавляется отталкивание, чтобы настоящий узел
 // раскрылся в гладкую объёмную (каноническую) форму. Переключается в animate().
 let physRepOn=false;
-function relaxStep(){
-  for(let i=0;i<N;i++){ _p0x[i]=verts[i].x; _p0y[i]=verts[i].y; _p0z[i]=verts[i].z; }
-  // 1) распрямление, ЧЕРЕДУЯ с непроникновением: коллизия гасит большой сдвиг сразу,
-  //    поэтому струна не «протягивается» тоньше своей толщины (нет тугого узелка).
-  //    Жёсткость = суммарная доза сглаживания T за шаг. Каждый отдельный проход
-  //    ограничен α≤0.33 (предел устойчивости Якоби-сглаживания), поэтому большая
-  //    жёсткость реализуется БОЛЬШИМ ЧИСЛОМ проходов, а не опасно-крупным α.
-  //    При bendCoef=5 это в точности прежние 4 прохода по α=0.25.
-  // Суммарная «доза» распрямления. До 10 — линейно (дефолт 5 не меняется);
-  // выше 10 шкала сжимается: 10→2.0 … 30→3.6. Дозы >4 на сложных узлах при
-  // сильном отталкивании выводят интегратор из устойчивой зоны (изгиб
-  // продавливает пряди в затор, возникает гофра-«спирали») — весь ползунок
-  // остаётся осмысленным, но внутри доказанно стабильного диапазона.
-  const T = bendCoef<=10 ? bendCoef*0.20 : 2.0 + (bendCoef-10)*0.08;
-  const k=Math.max(1, Math.min(20, Math.ceil(T/0.33)));
-  const alpha=T/k;
-  // 2) изгиб + отталкивание + непроникновение — В ОДНОМ цикле с одинаковой
-  //    дозировкой (по alpha на проход). Суммарные дозы за шаг: изгиб=T,
-  //    отталкивание=c·T → их ОТНОШЕНИЕ не зависит от ползунков, и изгиб
-  //    физически не может стянуть узловую область в тугой узелок
-  //    (раньше отталкивание было одним клампованным пинком за шаг и при
-  //    большой жёсткости проигрывало). При bendCoef=5 суммарная доза
-  //    отталкивания прежняя: 4·0.25·c = c.
-  for(let p=0;p<k;p++){
-    // клиренс-бюджет на проход: суммарный сдвиг каждой вершины за проход
-    // (изгиб + отталкивание + обе итерации коллизии) ≤ 40% её клиренса.
-    computeClearances(); snapshotQ();
-    bendingPass(alpha);                      clampToBudget();
-    if(physRepOn){ repulsionForce(alpha);    clampToBudget(); }
-    segCollide(1);                           clampToBudget();
-    segCollide(1);                           clampToBudget();
+/* ============================================================================
+   НОВОЕ ЯДРО ФИЗИКИ — МОНОТОННЫЙ ГРАДИЕНТНЫЙ СПУСК ПО ПОЛНОЙ ЭНЕРГИИ.
+   Одна скалярная энергия узла:
+     E = E_stretch (почти жёсткие сегменты, (|e|−L0)²)
+       + E_bend    (упругость: Σ θ² по стыкам — минимум для петли = окружность)
+       + E_rep     (мягкое дальнее самоотталкивание, раздувает узел)
+       + E_barrier (крутая стенка при сближении прядей ближе толщины D)
+   Шаг: x ← x − dt·∇E, и ПРИНИМАЕТСЯ ТОЛЬКО ЕСЛИ E УМЕНЬШИЛАСЬ (backtracking).
+   Отсюда по построению:
+   • автоколебания невозможны — энергия строго убывает, циклу неоткуда качаться;
+   • «кудряшки»/гофра невозможны — они ПОВЫШАЮТ E_bend, спуск их не создаёт;
+   • не нужны ресэмплинг/рескейл/снятие вращения: точки материальные, длину
+     держит E_stretch, а у градиента инвариантной энергии суммарные сила и
+     момент равны нулю аналитически — узел не едет и не крутится;
+   • анти-туннель: шаг ограничен 0.4·(мин. зазор) ЕДИНЫМ масштабом + барьер.
+   ========================================================================== */
+let _etaStep=0;            // адаптивный шаг спуска (сбрасывается в startPhysics)
+const KBAR=8;              // высота барьера толщины
+
+// проекция ПОЛЯ НАПРАВЛЕНИЯ (_disp) на касательное пространство жёстких рёбер:
+// убирает компоненту, растягивающую/сжимающую рёбра (в 1-м порядке). Без этого
+// изгибный градиент (он по природе укорачивает кривую) почти целиком гасится
+// последующей проекцией позиций, и line search не находит спуска.
+function dirTangentProject(iters){
+  for(let it=0;it<iters;it++){
+    for(let i=0;i<N;i++){
+      const j=(i+1)%N;
+      let ex=verts[j].x-verts[i].x, ey=verts[j].y-verts[i].y, ez=verts[j].z-verts[i].z;
+      const len=Math.sqrt(ex*ex+ey*ey+ez*ez); if(len<1e-12) continue;
+      ex/=len; ey/=len; ez/=len;
+      const s=0.5*((_dispx[j]-_dispx[i])*ex+(_dispy[j]-_dispy[i])*ey+(_dispz[j]-_dispz[i])*ez);
+      _dispx[i]+=s*ex; _dispy[i]+=s*ey; _dispz[i]+=s*ez;
+      _dispx[j]-=s*ex; _dispy[j]-=s*ey; _dispz[j]-=s*ez;
+    }
   }
-  // 3) равномерность по дуге + постоянная длина (ресэмплинг срезает углы хорд —
-  //    тоже под бюджетом, иначе хорда может «прорезать» соседнюю прядь)
-  computeClearances(); snapshotQ();
-  resampleUniform();                         clampToBudget();
-  recenter();
-  rescaleToTarget();                     // постоянная полная длина (п.6)
-  // 4) финальное непроникновение (каждая итерация под бюджетом)
-  computeClearances(); snapshotQ();
-  for(let it=0; it<6; it++){ segCollide(1);  clampToBudget(); }
-  recenter();
-  // потолок суммарного сдвига за подшаг (гарантия непересечения — в
-  // попроходных капах выше; здесь просто ограничитель размаха)
-  const maxStep=0.6*L0;
+}
+
+// ЖЁСТКИЕ СЕГМЕНТЫ: точная проекция длин рёбер на L0 (Якоби — симметрично,
+// без сноса) + микрокоррекция полной длины однородным масштабом. Растяжение
+// исключено из энергии: жёсткая пружина в E делает спуск мучительно медленным
+// (число обусловленности ~ жёсткость/изгиб), а проекция — точной и бесплатной.
+function edgeProject(iters){
+  for(let it=0;it<iters;it++){
+    for(let i=0;i<N;i++){ _sx[i]=0;_sy[i]=0;_sz[i]=0; }
+    for(let i=0;i<N;i++){
+      const j=(i+1)%N;
+      let dx=verts[j].x-verts[i].x, dy=verts[j].y-verts[i].y, dz=verts[j].z-verts[i].z;
+      const len=Math.sqrt(dx*dx+dy*dy+dz*dz); if(len<1e-12) continue;
+      const c=0.5*(len-L0)/len;
+      dx*=c; dy*=c; dz*=c;
+      _sx[i]+=dx; _sy[i]+=dy; _sz[i]+=dz;
+      _sx[j]-=dx; _sy[j]-=dy; _sz[j]-=dz;
+    }
+    for(let i=0;i<N;i++){ verts[i].x+=_sx[i]; verts[i].y+=_sy[i]; verts[i].z+=_sz[i]; }
+  }
+  let tl=0; for(let i=0;i<N;i++) tl+=verts[i].distanceTo(verts[(i+1)%N]);
+  if(isFinite(tl)&&tl>1e-9){ const f=(N*L0)/tl; if(f>0.9&&f<1.1) for(const v of verts) v.multiplyScalar(f); }
+}
+
+// энергия и (опционально) градиент в _disp*; возвращает {E, gmax, gmin}
+function energyGrad(needGrad){
+  const kb = 0.06*(bendCoef<=10 ? bendCoef : 10+(bendCoef-10)*0.5);   // изгиб
+  const cr = physRepOn ? 0.012*(repCoef<=10 ? repCoef : 10+(repCoef-10)*0.5) + 0.004 : 0;
+  const D=COLLIDE_D*L0, skip=Math.max(SKIP+1, Math.round(N*0.08));
+  let E=0;
+  if(needGrad) for(let i=0;i<N;i++){ _dispx[i]=0;_dispy[i]=0;_dispz[i]=0; }
+  // (растяжения в энергии НЕТ: длины рёбер держит точная проекция edgeProject —
+  //  жёсткая пружина в E давила бы спуск числом обусловленности ~100:1)
+  // --- изгиб: (kb/2)·θ² на каждом стыке; точный градиент угла по трём вершинам ---
   for(let i=0;i<N;i++){
-    const dx=verts[i].x-_p0x[i], dy=verts[i].y-_p0y[i], dz=verts[i].z-_p0z[i];
-    const m=Math.sqrt(dx*dx+dy*dy+dz*dz);
-    if(m>maxStep){ const s=maxStep/m; verts[i].set(_p0x[i]+dx*s, _p0y[i]+dy*s, _p0z[i]+dz*s); }
+    const im=(i-1+N)%N, ip=(i+1)%N;
+    const e1x=verts[i].x-verts[im].x, e1y=verts[i].y-verts[im].y, e1z=verts[i].z-verts[im].z;
+    const e2x=verts[ip].x-verts[i].x, e2y=verts[ip].y-verts[i].y, e2z=verts[ip].z-verts[i].z;
+    let nx=e1y*e2z-e1z*e2y, ny=e1z*e2x-e1x*e2z, nz=e1x*e2y-e1y*e2x;
+    const nlen=Math.sqrt(nx*nx+ny*ny+nz*nz);
+    const dot=e1x*e2x+e1y*e2y+e1z*e2z;
+    const th=Math.atan2(nlen,dot);
+    E += 0.5*kb*th*th;
+    if(needGrad && nlen>1e-12){
+      const inv=1/nlen; nx*=inv; ny*=inv; nz*=inv;               // N̂
+      const l1=Math.sqrt(e1x*e1x+e1y*e1y+e1z*e1z)||1e-12;
+      const l2=Math.sqrt(e2x*e2x+e2y*e2y+e2z*e2z)||1e-12;
+      // ∂θ/∂p_im = +(N̂×ê1)/l1 ; ∂θ/∂p_ip = +(N̂×ê2)/l2 ; ∂θ/∂p_i = −(сумма)
+      // (проверено конечными разностями по всем компонентам)
+      let p1x=(ny*e1z-nz*e1y)/l1, p1y=(nz*e1x-nx*e1z)/l1, p1z=(nx*e1y-ny*e1x)/l1;
+      let p2x=(ny*e2z-nz*e2y)/l2, p2y=(nz*e2x-nx*e2z)/l2, p2z=(nx*e2y-ny*e2x)/l2;
+      p1x/=l1; p1y/=l1; p1z/=l1;   // (N̂×e1)/l1² = (N̂×ê1)/l1
+      p2x/=l2; p2y/=l2; p2z/=l2;
+      const g=kb*th;
+      _dispx[im]+=g*p1x; _dispy[im]+=g*p1y; _dispz[im]+=g*p1z;
+      _dispx[ip]+=g*p2x; _dispy[ip]+=g*p2y; _dispz[ip]+=g*p2z;
+      _dispx[i] -=g*(p1x+p2x); _dispy[i]-=g*(p1y+p2y); _dispz[i]-=g*(p1z+p2z);
+    }
   }
-  removeRigidRotation();                 // снять паразитный чистый поворот за шаг
+  // --- отталкивание + барьер толщины: по парам НЕсоседних отрезков ---
+  let gmin=Infinity;
+  const q=0.25*L0*L0;
+  for(let i=0;i<N;i++){ const ip=(i+1)%N;
+    for(let j=i+1;j<N;j++){ const jp=(j+1)%N;
+      const cd=Math.min((j-i),(N-(j-i)));
+      if(cd<=2) continue;
+      const r=_closestSeg(verts[i],verts[ip],verts[j],verts[jp]);
+      const d=r.dist;
+      if(d<gmin) gmin=d;
+      let dEdd=0;
+      if(cd>skip && cr>0){
+        // дальнее раздувание: cr·L0²/(d²+q)  (гладкое, насыщенное вблизи)
+        const den=d*d+q;
+        E += cr*L0*L0/den;
+        dEdd += -2*cr*L0*L0*d/(den*den);
+      }
+      if(d<D){
+        // барьер толщины: KBAR·((D−d)/D)³ — круто растёт при сжатии
+        const u=(D-d)/D;
+        E += KBAR*u*u*u;
+        dEdd += -3*KBAR*u*u/D;
+      }
+      if(needGrad && dEdd!==0 && d>1e-9){
+        const f=-dEdd/d;             // сила распределяется в точки касания
+        const fx=f*r.dx, fy=f*r.dy, fz=f*r.dz;
+        const wa0=1-r.s, wa1=r.s, wb0=1-r.t, wb1=r.t;
+        _dispx[i]-=fx*wa0; _dispy[i]-=fy*wa0; _dispz[i]-=fz*wa0;
+        _dispx[ip]-=fx*wa1; _dispy[ip]-=fy*wa1; _dispz[ip]-=fz*wa1;
+        _dispx[j]+=fx*wb0; _dispy[j]+=fy*wb0; _dispz[j]+=fz*wb0;
+        _dispx[jp]+=fx*wb1; _dispy[jp]+=fy*wb1; _dispz[jp]+=fz*wb1;
+      }
+    }
+  }
+  let gmax=0;
+  if(needGrad) for(let i=0;i<N;i++){
+    const m=_dispx[i]*_dispx[i]+_dispy[i]*_dispy[i]+_dispz[i]*_dispz[i];
+    if(m>gmax) gmax=m;
+  }
+  return {E, gmax:Math.sqrt(gmax), gmin};
+}
+
+function relaxStep(){
+  // ПРОЕКЦИОННЫЙ монотонный спуск: x ← proj(x − dt·∇̃E); принимаем ТОЛЬКО если
+  // энергия ПОСЛЕ проекции уменьшилась. Жёсткие сегменты = многообразие,
+  // спуск идёт по нему; авто-колебаниям и «кудряшкам» качаться нечем.
+  const g0=energyGrad(true);
+  if(g0.gmax<1e-12){ safetyClamp(); return; }
+  // СОБОЛЕВСКИЙ ГРАДИЕНТ: направление спуска — сглаженный вдоль цепочки градиент
+  // (циклическое усреднение — SPD-оператор, поэтому направление остаётся спуском,
+  // а line search сохраняет монотонность). Без этого явный спуск упирается в
+  // жёсткость коротких волн (нужно ~N² шагов до окружности); со сглаживанием
+  // длинноволновые моды идут крупным шагом. Стандартный приём для изгибных
+  // потоков и «repulsive curves».
+  snapshotQ();                               // точка отката
+  let accepted=false, dt=0;
+  // ДВА ЯРУСА направления: (1) сглаженный + касательный (быстрый),
+  // (2) чисто касательный градиент (гарантированный спуск на многообразии).
+  for(let tier=0; tier<2 && !accepted; tier++){
+    if(tier===0){
+      for(let pass=0; pass<12; pass++){
+        for(let i=0;i<N;i++){
+          const im=(i-1+N)%N, ip=(i+1)%N;
+          _sx[i]=0.25*_dispx[im]+0.5*_dispx[i]+0.25*_dispx[ip];
+          _sy[i]=0.25*_dispy[im]+0.5*_dispy[i]+0.25*_dispy[ip];
+          _sz[i]=0.25*_dispz[im]+0.5*_dispz[i]+0.25*_dispz[ip];
+        }
+        for(let i=0;i<N;i++){ _dispx[i]=_sx[i]; _dispy[i]=_sy[i]; _dispz[i]=_sz[i]; }
+      }
+    } else {
+      energyGrad(true);                      // свежий сырой градиент
+    }
+    dirTangentProject(8);                    // направление — в касательном пространстве
+    let dmax=0;
+    for(let i=0;i<N;i++){
+      const m=_dispx[i]*_dispx[i]+_dispy[i]*_dispy[i]+_dispz[i]*_dispz[i];
+      if(m>dmax) dmax=m;
+    }
+    dmax=Math.sqrt(dmax);
+    if(dmax<1e-12) continue;
+    if(_etaStep<=0) _etaStep=0.05*L0/dmax;
+    // единый анти-туннельный потолок: max|сдвиг| ≤ 0.35·(мин. зазор) и ≤ 0.5·L0
+    const dtCap=Math.min(0.35*g0.gmin, 0.5*L0)/dmax;
+    dt=Math.min(_etaStep, dtCap);
+    for(let t=0;t<8;t++){
+      for(let i=0;i<N;i++){
+        verts[i].x=_qx[i]-dt*_dispx[i];
+        verts[i].y=_qy[i]-dt*_dispy[i];
+        verts[i].z=_qz[i]-dt*_dispz[i];
+      }
+      edgeProject(6);                        // проекция на жёсткие длины
+      const e1=energyGrad(false);
+      // приёмка: энергия убыла И зазор не обрушился (страховка анти-туннеля)
+      if(e1.E<g0.E-1e-12 && e1.gmin>0.55*Math.min(g0.gmin, COLLIDE_D*L0)){ accepted=true; break; }
+      dt*=0.5;
+    }
+    if(!accepted) for(let i=0;i<N;i++){ verts[i].x=_qx[i]; verts[i].y=_qy[i]; verts[i].z=_qz[i]; }
+  }
+  if(!accepted){
+    _etaStep*=0.5;                            // у минимума — мельче шаг в следующий раз
+    if(_etaStep<1e-7*L0) _etaStep=1e-7*L0;
+  } else {
+    _etaStep=dt*1.3;
+  }
+  recenter();                                 // E инвариантна к сдвигу — безопасно
   safetyClamp();
 }
 
-function removeRigidRotation(){
-  // Численный цикл (изгиб↔масштаб↔ресэмплинг) на несимметричной форме создаёт
-  // крошечный ЧИСТЫЙ ПОВОРОТ всего узла за шаг. Поворот — мода нулевой энергии
-  // (энергию не меняет), у градиентного спуска нет возвращающей силы против него,
-  // поэтому он накапливается в вечное видимое вращение. Убираем его точно:
-  // ω = Σ r×d / Σ|r|² по смещениям шага, затем обратный поворот Родригеса на |ω|.
-  let cx=0,cy=0,cz=0; for(const v of verts){cx+=v.x;cy+=v.y;cz+=v.z;} cx/=N;cy/=N;cz/=N;
-  let ox=0,oy=0,oz=0,rr=0;
-  for(let i=0;i<N;i++){
-    const rx=verts[i].x-cx, ry=verts[i].y-cy, rz=verts[i].z-cz;
-    const dx=verts[i].x-_p0x[i], dy=verts[i].y-_p0y[i], dz=verts[i].z-_p0z[i];
-    ox+=ry*dz-rz*dy; oy+=rz*dx-rx*dz; oz+=rx*dy-ry*dx;
-    rr+=rx*rx+ry*ry+rz*rz;
-  }
-  if(rr<1e-12) return;
-  ox/=rr; oy/=rr; oz/=rr;
-  const th=Math.hypot(ox,oy,oz);
-  if(th<1e-12) return;
-  const ux=ox/th, uy=oy/th, uz=oz/th, c=Math.cos(th), s=Math.sin(th), mc=1-c;
-  for(const v of verts){
-    const px=v.x-cx, py=v.y-cy, pz=v.z-cz;
-    // R(−θ)p = p·cosθ − (u×p)·sinθ + u(u·p)(1−cosθ)
-    const crx=uy*pz-uz*py, cry=uz*px-ux*pz, crz=ux*py-uy*px;
-    const dot=ux*px+uy*py+uz*pz;
-    v.x=cx + px*c - crx*s + ux*dot*mc;
-    v.y=cy + py*c - cry*s + uy*dot*mc;
-    v.z=cz + pz*c - crz*s + uz*dot*mc;
-  }
-}
 
 /* ============================================================================
    ЧАСТЬ D — THREE.JS СЦЕНА: трубка, пол, мягкая тень, материалы.
@@ -1154,7 +1164,7 @@ function animate(){
       // Замираем ТОЛЬКО когда это реально круг. Если движение встало, а круга нет —
       // застряли у седла: сплющиваем (planarize).
       const rv=curveRvar();
-      if(maxMove<settleEps && rv>=1.2){ settleCount=0; planarizePass(0.6); }
+      if(maxMove<settleEps && rv>=1.2){ settleCount=0; planarizePass(0.6); _etaStep=0; }
       if(settleCount>20){ stopPhysics('тривиальный узел → окружность'); }
       else setStatus('раскручивание… разброс '+rv.toFixed(1)+'%');
     } else {
@@ -1216,7 +1226,7 @@ function stepAndMeasure(){
 let physPhase=1, physEverRun=false;
 function startPhysics(){
   if(!verts.length) return;
-  running=true; physEverRun=true; settleCount=0; shapeStableCount=0; _prevBendE=NaN; _shapeHist=[]; telem=[];
+  running=true; physEverRun=true; settleCount=0; shapeStableCount=0; _prevBendE=NaN; _shapeHist=[]; telem=[]; _etaStep=0;
   // ТИП УЗЛА берём из определителя диаграммы (топологически точно, не путается со
   // скручиванием/writhe): =1 → тривиальный (фаза 1, распускаем в круг); >1 → узел
   // (фаза 2, отталкивание раскрывает в каноническую форму).
@@ -1245,7 +1255,7 @@ const thick=document.getElementById('thick'), color=document.getElementById('col
 // Смена регулировки после достигнутого равновесия перезапускает релаксацию до
 // нового равновесия; во время работы — сбрасывает счётчики покоя (новые силы).
 function physSettingsChanged(){
-  if(running){ settleCount=0; shapeStableCount=0; _prevBendE=NaN; _shapeHist=[]; }
+  if(running){ settleCount=0; shapeStableCount=0; _prevBendE=NaN; _shapeHist=[]; _etaStep=0; }
   else if(physEverRun && closedCurve && verts.length) startPhysics();
 }
 bendCoefEl.oninput=()=>{ bendCoef=+bendCoefEl.value; document.getElementById('bendVal').textContent=bendCoefEl.value; physSettingsChanged(); };
