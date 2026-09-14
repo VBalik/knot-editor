@@ -3,3 +3,13 @@ node_modules/
 *.log
 .claude/
 knot-telemetry*.json
+
+# рабочие выходы стенда и посторонние папки (не для публичного репозитория)
+test/out/
+*.out
+*.cpuprofile
+test/err*.txt
+market-shapes/
+*.tmp
+test/wf_*.js
+test/wasm/knots.json
