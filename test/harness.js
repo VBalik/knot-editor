@@ -76,6 +76,8 @@ function def(name, value){
 }
 def('window', sandbox);
 def('__noAutoThick', true);           // стенд: тесты задают толщину явно (autoThick страницы отключён)
+if(process.env.NOWASM) def('__noWasm', true);   // NOWASM=1 — JS-путь ядра пар (3.2; результаты те же бит-в-бит)
+if(process.env.NOWASM==='2') def('WebAssembly', undefined);   // NOWASM=2 — как браузер без WebAssembly: обычные массивы вместо арены
 def('addEventListener', ()=>{});            // window.addEventListener (window===global)
 def('removeEventListener', ()=>{});
 def('document', documentMock);
@@ -161,6 +163,7 @@ global.__require = require;
 const testFile = process.argv[2];
 if(!testFile){ console.error('usage: node harness.js <test.js>'); process.exit(1); }
 const testCode = fs.readFileSync(path.resolve(testFile),'utf8');
-Promise.resolve(vm.runInThisContext('('+testCode+')', {filename:testFile}))
+Promise.resolve(window.__waReady)   // 3.2: дождаться сборки Wasm-ядра пар (иначе тест стартовал бы на JS-пути)
+  .then(()=>vm.runInThisContext('('+testCode+')', {filename:testFile}))
   .then(r=>{ console.log(JSON.stringify(r)); process.exit(0); })
   .catch(e=>{ console.error('TEST ERROR:', e && e.stack || e); process.exit(1); });

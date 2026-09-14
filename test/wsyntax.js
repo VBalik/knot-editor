@@ -10,8 +10,10 @@
     const k=src.indexOf('self.onmessage'); const full=src.slice(0,k)+body+src.slice(k);
     out.fullLen=full.length; out.pageLen=body.length;
     try{ new Function(full); out.fullSyntax='OK'; }catch(e){ out.fullSyntax='ERROR: '+e.message; }
-    const helpers=['_vlEnsure','_vlBuild','_cellKeys','_segDist','_flatCoords','_gridAssign','_gapScan','_sbKey','_ctFwdBack','jacobiEig'];
+    const helpers=['_vlEnsure','_vlBuild','_cellKeys','_segDist','_flatCoords','_gridAssign','_gapScan','_sbKey','_ctFwdBack','jacobiEig','_waInit','_waLayout','_waViews','_waB64','_waMemInit'];
     out.helpers={}; for(const h of helpers) out.helpers[h]=new RegExp('function '+h+'\\(').test(full);
-    out.helpersOk=helpers.every(h=>out.helpers[h]);
+    out.hasWasmB64=/const WASM_B64='[A-Za-z0-9+\/=]{500,}';/.test(full); out.hasPairPass=/_waPair=r\.instance\.exports\.pairPass/.test(full) && /E=_waPair\(n, needGrad\?1:0, hasKR,/.test(full);   // 3.2: модуль и его вызов — внутри исходника воркера
+    out.hasWaAwait=/self\.__noWasm=!!m\.noWasm; await _waInit\(\);/.test(src);
+    out.helpersOk=helpers.every(h=>out.helpers[h]) && out.hasWasmB64 && out.hasPairPass && out.hasWaAwait;
   }catch(e){ out.fullErr=e.message; }
   return out; })()

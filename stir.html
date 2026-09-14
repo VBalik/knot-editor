@@ -273,7 +273,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   <!-- ================= LEFT: 2D drawing ================= -->
   <div id="left" class="pane">
     <div class="topbar">
-      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.1</span></span>
+      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.2</span></span>
       <button id="restoreLast" title="Restore the last drawing from telemetry">Last</button><button id="clear" class="ghost">Clear</button>
       <span class="seg" id="presets" title="Example knots">
         <button class="ex" data-knot="trefoil" title="Trefoil 3₁">3₁</button>
@@ -900,14 +900,61 @@ let worldScale=1, worldCx=0, worldCy=0;
 let _sx, _sy, _sz, _fx, _fy, _fz, _px, _py, _pz, _qx, _qy, _qz, _t1, _t2, _t3, _mx, _my, _mz;
 let _vx, _vy, _vz;   // fast: плоские координаты вершин (копия verts на время счёта энергии и сканов зазоров)
 let _nx, _ny, _nz, _cn2;   // контактные нормали вершин (куда «наружу» от чужой пряди)
+// ---- WASM (3.2): ядро пар energyGrad в WebAssembly (AssemblyScript, test/wasm/pairs.ts; сборка и вставка base64 — test/wasm/build.sh) ----
+// Одна память-арена на поток (главный и каждый воркер); рабочие массивы ядра — виды в неё (после grow виды пересоздаются, имена те же).
+// JS-путь остаётся запасным и даёт те же числа бит-в-бит (те же операции в том же порядке): переключение невидимо для траектории.
+const WASM_B64='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';   // pairs.wasm в base64 — строку переписывает test/wasm/build.sh
+let _waOK=null, _waPair=null, _waP=null, _waCalls=0, _jsCalls=0;   // null — модуль ещё не собран (JS-путь); true/false — готов/недоступен; счётчики проходов пар для стенда
+const _wa={mem:null, cap:{n:0, nnz:0, vn:0}, off:{}, v:{}, buf:null, bytes:0, grows:0};   // cap.n/nnz — ёмкость (вершин / элементов списка Верле), cap.vn — текущее N (длины видов)
+let _vlStart=null,_vlJ=null,_gcX=null,_gcY=null,_gcZ=null,_ordK=null;   // список Верле (CSR), ячейки сетки 2.11, буфер сортировки — объявлены здесь: виды арены создаёт уже allocBuffers()
+let _kRmul=null;   // профиль отталкивания попытки (f64×N, null — нет); при арене — вид (profilesStart)
+function _waMemInit(){ if(_wa.mem || typeof WebAssembly==='undefined') return; try{ _wa.mem=new WebAssembly.Memory({initial:4}); }catch(e){ _wa.mem=null; } }
+function _waB64(s){   // base64 → байты; без atob/Buffer — одинаково в браузере, воркере и Node
+  const T=new Uint8Array(128), A='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'; for(let i=0;i<64;i++) T[A.charCodeAt(i)]=i;
+  let L=s.length; while(L>0 && s.charCodeAt(L-1)===61) L--;
+  const out=new Uint8Array((L*3)>>2); let o=0, acc=0, bits=0;
+  for(let i=0;i<L;i++){ acc=((acc<<6)|T[s.charCodeAt(i)&127])&0xffffff; bits+=6; if(bits>=8){ bits-=8; out[o++]=(acc>>bits)&255; } }
+  return out;
+}
+function _waViews(){   // пересоздать все виды по текущей раскладке (после grow старые недействительны); глобальные имена указывают на те же байты
+  const b=_wa.mem.buffer, o=_wa.off, n=_wa.cap.vn, v=_wa.v, ob=_wa.buf, wasKR=!!(_kRmul && (_kRmul.buffer===ob || _kRmul.buffer===b)); _wa.buf=b;
+  v.vx=new Float64Array(b,o.vx,n); v.vy=new Float64Array(b,o.vy,n); v.vz=new Float64Array(b,o.vz,n); v.mx=new Float64Array(b,o.mx,n); v.my=new Float64Array(b,o.my,n); v.mz=new Float64Array(b,o.mz,n);
+  v.fx=new Float64Array(b,o.fx,n); v.fy=new Float64Array(b,o.fy,n); v.fz=new Float64Array(b,o.fz,n); v.kR=new Float64Array(b,o.kR,n);
+  v.gcX=new Int32Array(b,o.gcX,n); v.gcY=new Int32Array(b,o.gcY,n); v.gcZ=new Int32Array(b,o.gcZ,n); v.ordK=new Int32Array(b,o.ordK,n); v.vlStart=new Int32Array(b,o.vlStart,n+1); v.res=new Float64Array(b,o.res,4);
+  v.vlJ=_wa.cap.nnz? new Int32Array(b,o.vlJ,_wa.cap.nnz) : null;
+  _vx=v.vx; _vy=v.vy; _vz=v.vz; _mx=v.mx; _my=v.my; _mz=v.mz; _fx=v.fx; _fy=v.fy; _fz=v.fz; _gcX=v.gcX; _gcY=v.gcY; _gcZ=v.gcZ; _ordK=v.ordK; _vlStart=v.vlStart; if(v.vlJ) _vlJ=v.vlJ; if(wasKR) _kRmul=v.kR;
+}
+function _waLayout(n, nnz){   // ёмкость арены ≥ n вершин и ≥ nnz элементов списка Верле (только рост); раскладка по ёмкости, список Верле последним (его рост ничего не сдвигает); при нехватке — grow (байты сохраняются)
+  const c=_wa.cap; if(n>c.n) c.n=n; if(nnz>c.nnz) c.nnz=nnz; c.vn=n;
+  const cn=c.n, o=_wa.off; let p=16; const f64=(k)=>{ const a=p; p+=8*k; return a; }, i32=(k)=>{ const a=p; p+=(4*k+7)&~7; return a; };
+  o.vx=f64(cn); o.vy=f64(cn); o.vz=f64(cn); o.mx=f64(cn); o.my=f64(cn); o.mz=f64(cn); o.fx=f64(cn); o.fy=f64(cn); o.fz=f64(cn); o.kR=f64(cn);
+  o.gcX=i32(cn); o.gcY=i32(cn); o.gcZ=i32(cn); o.ordK=i32(cn); o.vlStart=i32(cn+1); o.res=f64(4); o.vlJ=i32(c.nnz); _wa.bytes=p;
+  const have=_wa.mem.buffer.byteLength; if(have<p){ _wa.mem.grow(Math.ceil((p-have)/65536)+1); _wa.grows++; }
+  _waViews();
+}
+function _waInit(){   // сборка модуля (асинхронно, один раз на поток); до готовности и при любом отказе — JS-путь
+  if(_waP) return _waP;
+  _waP=(async ()=>{ try{
+      if(typeof WebAssembly==='undefined' || !_wa.mem) throw new Error('WebAssembly unavailable');
+      const r=await WebAssembly.instantiate(_waB64(WASM_B64), {env:{memory:_wa.mem, abort(){}}});
+      _waPair=r.instance.exports.pairPass; _waOK=true;
+    }catch(e){ _waOK=false; _waPair=null; if(typeof console!=='undefined') console.warn('wasm pair kernel unavailable, JS path:', (e && e.message) || e); }
+    return _waOK; })();
+  return _waP;
+}
+_waMemInit(); window.__waReady=_waInit();   // память — сразу (allocBuffers ниже кладёт массивы в арену), модуль — асинхронно (стенд ждёт __waReady)
+window.__wasm=()=>({ok:_waOK, used:_waCalls, js:_jsCalls, grows:_wa.grows, bytes:_wa.bytes});   // стенд: готовность и счётчики проходов
 function allocBuffers(){
   _sx=new Float64Array(N); _sy=new Float64Array(N); _sz=new Float64Array(N);
   _fx=new Float64Array(N); _fy=new Float64Array(N); _fz=new Float64Array(N);
   _px=new Float64Array(N); _py=new Float64Array(N); _pz=new Float64Array(N);
   _qx=new Float64Array(N); _qy=new Float64Array(N); _qz=new Float64Array(N);
   _t1=new Float64Array(N); _t2=new Float64Array(N); _t3=new Float64Array(N);
+  if(_wa.mem){ _waLayout(N, _wa.cap.nnz); _fx.fill(0); _fy.fill(0); _fz.fill(0); _mx.fill(0); _my.fill(0); _mz.fill(0); _vx.fill(0); _vy.fill(0); _vz.fill(0); }   // Wasm: виды арены (обнулены, как новые массивы)
+  else {
+  _fx=new Float64Array(N); _fy=new Float64Array(N); _fz=new Float64Array(N);
   _mx=new Float64Array(N); _my=new Float64Array(N); _mz=new Float64Array(N);
-  _vx=new Float64Array(N); _vy=new Float64Array(N); _vz=new Float64Array(N);
+  _vx=new Float64Array(N); _vy=new Float64Array(N); _vz=new Float64Array(N); }
   _nx=new Float64Array(N); _ny=new Float64Array(N); _nz=new Float64Array(N);
   _cn2=new Float64Array(N);          // >0 — вершина в контактной зоне
 }
@@ -1198,7 +1245,7 @@ let _runNote='';            // примечание к прогону (суфф�
 // сглаженный (I+300Δ)⁻¹ белый шум; σ(t)=σ₀·(1−t/T). Переопределение для стенда:
 // window.__ann={stiff:σ₀, rep:σ₀ᵣ, steps:T, every, jump, hard:true(без отжига — как в 2.08)}
 const STIFF_SPREAD=Math.log(32), REP_SPREAD=Math.log(16), STIFF_STEPS=1500, ANN_EVERY=10, ANN_JUMP=Math.round(STIFF_STEPS/8);
-let _kBmul=null, _kRmul=null, _stiffG=null, _repG=null, _annStep=0, _annSig=0, _annFresh=false, _annLast=0;   // _annLast — шаг последнего пересчёта (счётчик, а не остаток: скачок покоя может быть любым)
+let _kBmul=null, _stiffG=null, _repG=null, _annStep=0, _annSig=0, _annFresh=false, _annLast=0;   // (_kRmul объявлен в блоке арены Wasm)   // _annLast — шаг последнего пересчёта (счётчик, а не остаток: скачок покоя может быть любым)
 let _annSb=STIFF_SPREAD, _annSr=REP_SPREAD, _annT=STIFF_STEPS, _annEvery=ANN_EVERY, _annJump=ANN_JUMP, _annHard=false;
 function smoothG(){   // g — сглаженный (I+300Δ)⁻¹ белый шум, нормированный на [−1,1]
   const n=N; if(!(n>8)) return null;
@@ -1222,7 +1269,7 @@ function profilesStart(){   // случайные профили попытки 
   if(A.mixTo>_annSb){ const r=Math.random(); _annSb+=r*(A.mixTo-_annSb); _annSr+=r*((A.mixToR||A.mixTo)-_annSr); }   // лаборатория отжига: размах попытки случаен между базовым и mixTo (ln), один r на оба профиля
   _stiffG=smoothG(); _repG=_stiffG? smoothG() : null;
   if(!_stiffG || !_repG){ profilesClear(); return false; }
-  _kBmul=new Float64Array(N); _kRmul=new Float64Array(N); _annStep=0; annApply(1); return true;
+  _kBmul=new Float64Array(N); _kRmul=(_wa.mem && _wa.v.kR && _wa.v.kR.length===N)? _wa.v.kR : new Float64Array(N); _annStep=0; annApply(1); return true;   // профиль отталкивания — вид арены (читает Wasm-ядро без копий)
 }
 function annRange(){ return Math.exp(_annSb*_annSig); }   // текущий размах жёсткости ×R (для статуса)
 function annTick(){   // шаг отжига (фаза A, ядро в номинале): σ убывает линейно к нулю за _annT шагов
@@ -1241,7 +1288,8 @@ function annQuiet(){   // покой в фазе A: отжиг ещё не за�
 // во время фазы A показывается истинная энергия.
 const CK_EVERY=25;
 let _trueE=NaN, _ckE=Infinity, _ckVerts=null, _dbgCk=null;
-function trueEnergy(){ const kb=_kBmul, kr=_kRmul; _kBmul=null; _kRmul=null; const E=energyGrad(false).E; _kBmul=kb; _kRmul=kr; return E; }
+function trueEnergy(){ const kb=_kBmul, kr=_kRmul; _kBmul=null; _kRmul=null; const E=energyGrad(false).E; _kBmul=kb;
+  _kRmul=(kr && _wa.mem && kr.buffer!==_wa.mem.buffer && kr.buffer.byteLength===0)? _wa.v.kR : kr; return E; }   // вид арены отсоединён (grow внутри счёта: рост списка Верле) → свежий вид тех же байтов
 function ckObserve(){
   if(!(_kBmul||_kRmul) || _inflate<1 || stepCounter%CK_EVERY!==0) return;
   const E=trueEnergy(); if(!isFinite(E)) return; _trueE=E;
@@ -1471,6 +1519,13 @@ function energyGrad(needGrad, repOnly){
     // СПИСОК СОСЕДЕЙ ВЕРЛЕ (fast) вместо сетки на каждом счёте: тот же набор пар (точный тест сфер и ±1 ячейки) и тот же порядок
     // (ключи ячеек сетки 2.11: обход z,y,x соседних ячеек, в ячейке по возрастанию j) — суммы E и сил бит-в-бит, хэш траектории сохраняется
     _vlEnsure(n, R); _cellKeys(n, R);
+    const useWasm=_waOK && !_segGap && !_segGapRep && !_closeCollect && !_pairBrute && n>=64 && !(typeof window!=='undefined' && window.__noWasm);   // исключения → JS-путь (те же числа)
+    if(useWasm){   // Wasm-ядро (3.2, test/wasm/pairs.ts): тот же обход, тот же pairEval; E и силы продолжают суммы изгиба — бит-в-бит с JS-путём ниже
+      const hasKR=(_kRmul && _inflate>=1)? 1 : 0; if(hasKR && _kRmul!==_wa.v.kR) _wa.v.kR.set(_kRmul);   // профиль не из арены (запасной случай) — скопировать
+      const o=_wa.off;
+      E=_waPair(n, needGrad?1:0, hasKR, o.vx,o.vy,o.vz, o.mx,o.my,o.mz, o.fx,o.fy,o.fz, o.gcX,o.gcY,o.gcZ, o.vlStart, o.vlJ, o.ordK, o.kR, o.res, S, DC, R, L0, kR, u4, tailU, tailF, E);
+      const r=_wa.v.res; gmin=r[0]; gminRep=r[1]; gmin3=r[2]; if(r[3]) inf=true; _waCalls++;
+    } else { _jsCalls++;
     for(let i=0;i<n;i++){ let q=_vlStart[i]; const qe=_vlStart[i+1]; if(q===qe) continue;
       const ip=(i+1)%n, mxi=_mx[i], myi=_my[i], mzi=_mz[i], cxi=_gcX[i]-1, cyi=_gcY[i]-1, czi=_gcZ[i]-1; let k=0;
       for(; q<qe; q++){ const j=_vlJ[q];
@@ -1479,7 +1534,7 @@ function energyGrad(needGrad, repOnly){
         if(dx<0||dx>2||dy<0||dy>2||dz<0||dz>2) continue;
         const key=((dz*3+dy)*3+dx)*1048576+j; let p=k++; while(p>0 && _ordK[p-1]>key){ _ordK[p]=_ordK[p-1]; p--; } _ordK[p]=key; }   // вставкой: ранг ячейки, затем j
       for(let p=0;p<k;p++){ const j=_ordK[p]&1048575; pairEval(i,ip,j,(j+1)%n); }
-    }
+    } }
   }
   if(inf) E=Infinity;
   _lastGminRep=gminRep;
@@ -2754,7 +2809,7 @@ function _segDist(i,ip,j,jp){
 }
 let _lmax2=0, _egLast3=-1, _teleMin3=-1;   // квадрат длиннейшего ребра; минимум зазора cd>3 последнего счёта энергии (−1 — не сертифицирован); подсказка телеметрии
 function _flatCoords(){   // координаты вершин → плоские массивы, середины отрезков → _m* и Lmax (одним проходом; читают ядро пар и сканы)
-  const n=N; if(!_vx || _vx.length!==n){ _vx=new Float64Array(n); _vy=new Float64Array(n); _vz=new Float64Array(n); }
+  const n=N; if(!_vx || _vx.length!==n){ if(_wa.mem) _waLayout(n, _wa.cap.nnz); else { _vx=new Float64Array(n); _vy=new Float64Array(n); _vz=new Float64Array(n); } }   // Wasm: виды арены под текущее N
   for(let i=0;i<n;i++){ const v=verts[i]; _vx[i]=v.x; _vy[i]=v.y; _vz[i]=v.z; }
   let lm=0;
   for(let i=0;i<n;i++){ const ip=(i+1)%n; _mx[i]=(_vx[i]+_vx[ip])*0.5; _my[i]=(_vy[i]+_vy[ip])*0.5; _mz[i]=(_vz[i]+_vz[ip])*0.5;
@@ -2819,7 +2874,7 @@ function _gapScan(cdMin, arc){
 // ±1 ячейки сетки 2.11) даёт ровно то же множество пар, что сеточный перебор; порядок восстанавливается по ключам ячеек (_cellKeys) —
 // иначе суммы E и сил округляются иначе и траектория расходится (полный перебор в другом порядке даёт другой хэш — проверено)
 const VL_SKIN=1.0;   // запас списка в единицах L0
-let _vlN=0,_vlR=-1,_vlSkin=0,_vlStart=null,_vlJ=null,_vlBx=null,_vlBy=null,_vlBz=null,_vlBuilds=0,_gcX=null,_gcY=null,_gcZ=null,_ordK=null;
+let _vlN=0,_vlR=-1,_vlSkin=0,_vlBx=null,_vlBy=null,_vlBz=null,_vlBuilds=0;   // (_vlStart,_vlJ,_gcX,_gcY,_gcZ,_ordK объявлены в блоке арены Wasm)
 function _vlEnsure(n, R){
   const skin=VL_SKIN*L0;
   let need=!_vlStart || _vlN!==n || _vlR!==R || _vlSkin!==skin;
@@ -2830,8 +2885,9 @@ function _vlEnsure(n, R){
 function _vlBuild(n, R, skin){
   const RL=(R+skin)*(1+1e-9), RL2=RL*RL;   // запас 1e-9 против округления на границе R+skin (как у сетки и _gapScan)
   _gridAssign(RL); const gx=_gGx, gy=_gGy, gz=_gGz, gxy=gx*gy;
-  if(!_vlStart || _vlStart.length<n+1){ _vlStart=new Int32Array(n+1); _vlBx=new Float64Array(n); _vlBy=new Float64Array(n); _vlBz=new Float64Array(n); _gcX=new Int32Array(n); _gcY=new Int32Array(n); _gcZ=new Int32Array(n); _ordK=new Int32Array(n); }
-  if(!_vlJ) _vlJ=new Int32Array(Math.max(4096, 32*n));
+  if(!_vlBx || _vlBx.length<n){ _vlBx=new Float64Array(n); _vlBy=new Float64Array(n); _vlBz=new Float64Array(n);   // (то же условие, что прежнее _vlStart.length<n+1: массивы росли вместе)
+    if(!_wa.mem){ _vlStart=new Int32Array(n+1); _gcX=new Int32Array(n); _gcY=new Int32Array(n); _gcZ=new Int32Array(n); _ordK=new Int32Array(n); } }   // Wasm: эти виды арены создаёт allocBuffers
+  if(!_vlJ){ if(_wa.mem) _waLayout(n, Math.max(4096, 32*n)); else _vlJ=new Int32Array(Math.max(4096, 32*n)); }
   let cnt=0;
   for(let i=0;i<n;i++){ _vlStart[i]=cnt; const ci=_gcCell[i], cx=ci%gx, cy=((ci/gx)|0)%gy, cz=(ci/gxy)|0, mxi=_mx[i], myi=_my[i], mzi=_mz[i];
     for(let z=Math.max(0,cz-1); z<=Math.min(gz-1,cz+1); z++)
@@ -2841,7 +2897,7 @@ function _vlBuild(n, R, skin){
           for(let k=_gcStart[cc], ke=_gcStart[cc+1]; k<ke; k++){ const j=_gcItems[k]; if(j<=i) continue;
             const cd=Math.min(j-i, n-(j-i)); if(cd<=2) continue;
             const mdx=_mx[j]-mxi, mdy=_my[j]-myi, mdz=_mz[j]-mzi; if(mdx*mdx+mdy*mdy+mdz*mdz>RL2) continue;
-            if(cnt===_vlJ.length){ const g=new Int32Array(2*_vlJ.length); g.set(_vlJ); _vlJ=g; }
+            if(cnt===_vlJ.length){ if(_wa.mem) _waLayout(n, 2*_vlJ.length); else { const g=new Int32Array(2*_vlJ.length); g.set(_vlJ); _vlJ=g; } }   // арена: список последний в раскладке — растёт на месте
             _vlJ[cnt++]=j; } }
     if(cnt-_vlStart[i]>1) _vlJ.subarray(_vlStart[i], cnt).sort();
   }
@@ -3577,7 +3633,8 @@ function applyStretch(lo, sp){   // случайное аффинное раст
    по завершении каждой добавляет окно результата, в конце выбирает минимум. Пауза = отмена
    серии (лучший результат остаётся), ползунок во время серии = перезапуск, новая диаграмма и
    Clear = отмена. Без Worker (стенд, старые браузеры) — прежний последовательный путь. ---- */
-let _par=null, _parBlobURL=null;
+let _par=null, _parBlobURL=null, _parWasm=[];   // _parWasm[k] — счётчики Wasm-ядра воркера k из его 'done' (3.2)
+window.__parWasm=()=>_parWasm.slice();   // стенд: какой путь ядра пар брали воркеры последней серии
 function parAvailable(){ return typeof Worker==='function' && __PAGE_SRC.length>1000 && !window.__noWorkers && location.protocol!=='file:'; }   // file://: Safari не даёт blob-воркеру грузить three.js с CDN → последовательный путь
 function _workerSource(){
   const shim=`(function(){
@@ -3623,6 +3680,7 @@ function _workerSource(){
     if(self.__importFailed){ self.postMessage({type:'error', k:m.k, message:'importScripts failed: '+self.__importFailed}); return; }
     self.postMessage({type:'alive', k:m.k});   // 2.38: сторож 8 с ждёт первого сообщения — подготовка (лифт, выворачивание, первые 12 шагов на большом N) на занятой машине может идти дольше
     try{
+      self.__noWasm=!!m.noWasm; await _waInit();   // 3.2: флаг стенда «без Wasm» — из сообщения; модуль ядра пар — до старта физики (несколько мс; при отказе — JS-путь)
       thickCoef=m.thick; repCoef=m.rep; bendCoef=m.bend; MULTI_START=1; _stirN0=m.n0||0;   // N0 серии после Stir (фаза 3 возвращает к нему; 0 — обычная серия)
       if(m.resume){   // 2.30: досчёт закончившейся попытки с новыми константами — от её формы, без фазы A и без нового лифта
         _setVertsFrom(_vertsFromFlat(m.lift)); recenter(); _liftFromDiagram=false; _fromLift=false;
@@ -3656,7 +3714,7 @@ function _workerSource(){
       const bE=bEnergy(), circle=!!(_runUnknot && bE<1.3*4*Math.PI*Math.PI/N);
       const f=flat(verts);
       const Erec=(_phase3==='cert' && _stirN0>0)? _ePrev*N/_stirN0 : _ePrev;   // фаза 3 не прошла сертификат: E приведена к N0 (E·N/N0)
-      self.postMessage({type:'done', k:m.k, steps, E:Erec, jammed:_inflate<1, circle, status:st, det:_dbgDetEnd, runDet:_runDet, liftWarn:_liftWarn, bE, N, key:constsKey(), thick:_thickFit, phase2:_phase2, phase3:_phase3, pinsLeft:pinnedEnd, verts:f}, [f.buffer]);
+      self.postMessage({type:'done', k:m.k, steps, E:Erec, jammed:_inflate<1, circle, status:st, det:_dbgDetEnd, runDet:_runDet, liftWarn:_liftWarn, bE, N, key:constsKey(), thick:_thickFit, phase2:_phase2, phase3:_phase3, pinsLeft:pinnedEnd, wasm:(self.__wasm? self.__wasm() : null), verts:f}, [f.buffer]);   // wasm — счётчики ядра пар воркера (стенд: window.__parWasm())
     }catch(e){ self.postMessage({type:'error', k:m.k, message:String(e && e.stack || e)}); }
   };
 })();
@@ -3676,7 +3734,7 @@ function parStart(kind){
     : {lift:(()=>{ const f=new Float32Array(N*3); for(let i=0;i<N;i++){ f[3*i]=verts[i].x; f[3*i+1]=verts[i].y; f[3*i+2]=verts[i].z; } return f; })()};
   if(!carry) msWinsClear();
   _msOffset=carry?1:0; _msEnergies=(carry? [carry.E] : []).concat(new Array(K).fill(undefined)); _msThick=carry? [thickOf(carry)] : []; _msBest=carry? {E:carry.E, verts:carry.verts, msg:carry.note, round:-1, thick:thickOf(carry)} : null;
-  _msRound=0; _msK=K; _msLift=verts.map(v=>v.clone()); _msSteps=[];
+  _msRound=0; _msK=K; _msLift=verts.map(v=>v.clone()); _msSteps=[]; _parWasm=[];
   const pins0=(_pinsFresh && _stirPins)? _stirPins : null;   // свежие пины ремапа — про запас для последовательного отката (parFallback): попытка 1 там идёт от того же лифта
   _fromLift=false; _liftFromDiagram=(kind==='diagram'); _saddleN=0; _dbgSaddle=null; profilesClear(); _progRound=0; _stirPins=null; _pinsFresh=false; _pinPos=null; _pinMob=null;   // пины главного потока не нужны: воркеры строят свои
   _liftWarn=''; _runNote=''; _fbNote=''; _parMixed=false; if(!_msContinue){ _stirWarn=_stirWarn; }
@@ -3708,7 +3766,7 @@ function parLaunch(){
     w.onerror=(ev)=>{ if(ev && ev.preventDefault) ev.preventDefault(); if(_par && _par.active.get(k)===ent) parWorkerFailed(k, (ev && ev.message) || 'worker error'); };   // preventDefault: без «Script error.» в баннере страницы
     _par.active.set(k, ent);
     const P=_par; setTimeout(()=>{ if(_par===P && P.active.get(k)===ent && !ent.alive) parWorkerFailed(k, 'no response in 8 s'); }, 8000);   // 8 с: на занятой машине воркер стартует дольше
-    const base={type:'run', k, thick:thickCoef, rep:repCoef, bend:bendCoef, every:12, budget:80000, knotDet, isUnknot, n0:_stirN0};   // n0 — N0 серии после Stir (фаза 3 в воркере; 0 — нет)
+    const base={type:'run', k, thick:thickCoef, rep:repCoef, bend:bendCoef, every:12, budget:80000, knotDet, isUnknot, n0:_stirN0, noWasm:!!window.__noWasm};   // noWasm — флаг стенда (воркер читает его из сообщения)   // n0 — N0 серии после Stir (фаза 3 в воркере; 0 — нет)
     const s0=(_par.s0 && k>0)? Object.assign({k}, _par.s0) : null;
     w.postMessage(Object.assign(base, {stretch:(_par.kind==='lift' && k>0 && !s0)}, _par.payload, s0? {s0} : {}));
   }
@@ -3751,6 +3809,7 @@ function parMessage(k, m){
     parPickPreview(); setStatus(runStatus()); return; }
   if(m.type==='error'){ parWorkerFailed(k, m.message); return; }
   if(m.type!=='done') return;
+  _parWasm[k]=m.wasm||null;   // 3.2: путь ядра пар в воркере (ok/used/js) — для стенда
   try{ a.w.terminate(); }catch(e){} _par.active.delete(k);
   const vs=_vertsFromFlat(m.verts), jam=m.jammed;
   const note=(m.circle ? ' · circle' : (jam ? ' · does not fit' : ''))+(m.phase2? ' · 2 phases' : (m.pinsLeft? ' · pinned, no phase 2' : ''))+(m.phase3==='cert'? " · N' vertices, E normalised" : '');   // 2.29: «jammed» читалось как ошибка программы; это тесная посадка; фаза 3 без сертификата — E приведена к N0
@@ -4276,7 +4335,7 @@ window.__knotSetVerts=(arr)=>{ if(!arr||arr.length<8) return false; _liftFromDia
   N=verts.length; allocBuffers(); resampleEqualArc(); recenter();
   rebuildTube(); fitCamera(false); return {N,L0:+L0.toFixed(5)}; };
 // ВЕРСИЯ ИНТЕРФЕЙСА: X задаёт пользователь, Y растёт на 1 с каждой новой сборкой
-const APP_VER_MAJOR=3, APP_VER_MINOR=1;   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
+const APP_VER_MAJOR=3, APP_VER_MINOR=2;   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
 const APP_VERSION=APP_VER_MAJOR+'.'+APP_VER_MINOR;   // 3.0, 3.1, … (с 3.0 без дополнения нулём)
 window.__buildTag='v'+APP_VERSION+' stir-lab';
 { const el=document.getElementById('appVer'); if(el) el.textContent=APP_VERSION+' · Stir lab'; }
