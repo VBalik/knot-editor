@@ -268,6 +268,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   background:radial-gradient(135% 105% at 50% 42%, transparent 58%, rgba(2,4,9,.5) 100%);
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.02), inset 0 0 70px -40px rgba(62,224,210,.18), 0 10px 30px -18px rgba(0,0,0,.9)}
 
+#left.imgDrop .stagewrap{outline:2px dashed rgba(62,224,210,.65);outline-offset:-8px;border-radius:var(--r-stage)}   /* 3.4: сюда можно бросить картинку узла */
 /* UI 2.01: left only Random/Clear, right without legend/OBJ/Telem */
 #restoreLast,#presets,#buildTag,#crossInfo,#knotType,#hint,#stressChip,#exportObj,#exportTelem{display:none !important}
 </style>
@@ -277,7 +278,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   <!-- ================= LEFT: 2D drawing ================= -->
   <div id="left" class="pane">
     <div class="topbar">
-      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.2</span></span>
+      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.4</span></span>
       <button id="restoreLast" title="Restore the last drawing from telemetry">Last</button><button id="clear" class="ghost">Clear</button>
       <span class="seg" id="presets" title="Example knots">
         <button class="ex" data-knot="trefoil" title="Trefoil 3₁">3₁</button>
@@ -286,6 +287,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
         <button class="ex" data-knot="septafoil" title="Septafoil 7₁">7₁</button>
       </span>
       <span class="chip" title="Random diagram with the given number of crossings (over/under chosen at random); crossings are kept at least 1.5 marker radii apart"><button id="randKnot" class="ghost">Random</button><input id="randN" type="number" min="1" max="250" value="20" title="number of crossings, 1–250"></span>
+      <button id="imgLoad" class="ghost" title="Load a knot from a picture or sketch (PNG, JPEG…): strands with a gap at each under-crossing; crossings drawn without a gap get alternating over/under. You can also drop an image onto this pane or paste it (⌘V / Ctrl+V)">Image</button><input id="imgFile" type="file" accept="image/*" hidden>
       <span class="buildTag" id="buildTag" title="Build version"></span>
       <span class="chip" id="crossInfo" title="Number of diagram crossings">×<b>0</b></span>
       <span class="chip" id="knotType" title="Diagram determinant: 1 — unknot (will straighten into a circle)">type <b>—</b></span>
@@ -371,6 +373,7 @@ let totalLen2D = 0;
 let crossings = [];      // {x,y, sA, sB, over: 'A'|'B'}  (s — длина дуги)
 let drawing = false, closedCurve = false;
 const START_R = 13;      // радиус стартового кружка для замыкания
+let _ikUnder=null;   // 3.4: подложка 2D — распознанные штрихи загруженной картинки в координатах диаграммы {cv, x, y, w, h}; сбрасывают Clear, Random, пресеты
 let _v2={s:1,tx:0,ty:0};   // вид 2D-холста: масштаб (≤1) и сдвиг, чтобы вся диаграмма была видна при сужении панели (данные не меняются)
 function fitView(){ const pts=closedCurve? smooth : null; if(!pts || pts.length<2){ _v2={s:1,tx:0,ty:0}; return; }
   let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9; for(const q of pts){ if(q.x<minx)minx=q.x; if(q.x>maxx)maxx=q.x; if(q.y<miny)miny=q.y; if(q.y>maxy)maxy=q.y; }
@@ -559,6 +562,7 @@ function renderDraw(){
   dctx.clearRect(0,0,w,h);
   drawDotGrid(w,h);
   fitView(); dctx.setTransform(DPR*_v2.s,0,0,DPR*_v2.s,DPR*_v2.tx,DPR*_v2.ty);   // дальше — в координатах диаграммы
+  if(_ikUnder && closedCurve){ try{ dctx.save(); dctx.globalAlpha=0.2; dctx.drawImage(_ikUnder.cv, _ikUnder.x, _ikUnder.y, _ikUnder.w, _ikUnder.h); dctx.restore(); }catch(e){} }   // 3.4: картинка-источник (распознанные штрихи) под диаграммой — сверка распознавания
   // стартовый кружок
   const startPt = smooth.length?smooth[0]:(raw.length?raw[0]:null);
   // градиент вдоль холста: линия мягко переливается голубым → бирюзовым
@@ -628,7 +632,7 @@ function theme(){ if(_theme) return _theme; const g=(v,d)=>{ let x=''; try{ x=ge
   rn.onchange=clampN;
   document.getElementById('randKnot').onclick=()=>randomKnot(clampN()); }
 document.getElementById('clear').onclick=()=>{
-  raw=[]; smooth=[]; crossings=[]; closedCurve=false; drawing=false;
+  raw=[]; smooth=[]; crossings=[]; closedCurve=false; drawing=false; _ikUnder=null;
   stopPhysics('');
   parCancel(true); verts=[]; msWinsClear(); _msPaused=false; pillIdle(); stirCancel(); stirEnable(false); _stirWarn=''; _stirNote=''; _stirEv=[]; _msCarry=null; _msOffset=0;
   { const play=document.getElementById('play'); if(play) play.disabled=false; }
@@ -637,6 +641,436 @@ document.getElementById('clear').onclick=()=>{
   setStatus('waiting for a knot…');
   updateCrossInfo(); renderDraw();
 };
+
+/* ============================================================================
+   ЧАСТЬ A2 — УЗЕЛ ПО КАРТИНКЕ (3.4): распознавание диаграммы узла на изображении
+   (рисунок, скетч, фото). Конвейер: карта «чернил» (фон — по блокам) → порог
+   Оцу с гистерезисом → чистка → скелет (Чжан–Суэнь) → граф штрихов → пары
+   ветвей в развилках скелета (X — пересечение без разрыва, T — нижняя прядь
+   касается верхней) → сшивка свободных концов через разрывы (мост поперёк
+   чужого штриха = нижний проход) → замкнутая кривая + над/под для пересечений.
+   Чистые функции над {width,height,data RGBA}; DOM — только в ikLoadFile.
+   ========================================================================== */
+const IK_MAXW=1000;   // рабочий размер: длинная сторона ≤ 1000 px (усреднение блоками)
+function _ikPrep(img){
+  const W0=img.width|0, H0=img.height|0, d=img.data, n0=W0*H0;
+  let nOp=0, sL=0, nTr=0;
+  for(let i=0;i<n0;i++){ const a=d[4*i+3]; if(a>=250){ nOp++; sL+=0.299*d[4*i]+0.587*d[4*i+1]+0.114*d[4*i+2]; } else if(a<5) nTr++; }
+  const hasAlpha=nTr>0.02*n0 || nOp<0.95*n0;
+  const back=hasAlpha? ((nOp>0 && sL/nOp<128)? 255 : 0) : 255;   // прозрачный фон: тёмные штрихи кладём на белое, светлые — на чёрное
+  const f=Math.max(1, Math.ceil(Math.max(W0,H0)/IK_MAXW)), W=Math.max(1,Math.floor(W0/f)), H=Math.max(1,Math.floor(H0/f));
+  const R=new Float32Array(W*H), G=new Float32Array(W*H), B=new Float32Array(W*H), inv=1/(f*f*255);
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){ let r=0,g=0,b=0;
+    for(let yy=y*f; yy<(y+1)*f; yy++) for(let xx=x*f; xx<(x+1)*f; xx++){ const k=4*(yy*W0+xx), a=d[k+3], c=back*(255-a); r+=d[k]*a+c; g+=d[k+1]*a+c; b+=d[k+2]*a+c; }
+    const o=y*W+x; R[o]=r*inv; G[o]=g*inv; B[o]=b*inv; }
+  return {W, H, f, R, G, B};
+}
+function _ikInk(P){   // «чернильность» пикселя: отличие от ЛОКАЛЬНОГО фона по яркости (в сторону штрихов) + по цветности
+  const {W,H,R,G,B}=P, n=W*H, L=new Float32Array(n);
+  for(let i=0;i<n;i++) L[i]=0.299*R[i]+0.587*G[i]+0.114*B[i];
+  const bw=Math.max(1, Math.round(0.02*Math.min(W,H))), hR=new Uint32Array(256), hG=new Uint32Array(256), hB=new Uint32Array(256); let cnt=0;
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){ if(x>=bw && x<W-bw && y>=bw && y<H-bw) continue; const i=y*W+x; hR[R[i]|0]++; hG[G[i]|0]++; hB[B[i]|0]++; cnt++; }
+  const med=(h,c)=>{ let s=0; for(let k=0;k<256;k++){ s+=h[k]; if(2*s>=c) return k; } return 255; };
+  const bR=med(hR,cnt), bG=med(hG,cnt), bB=med(hB,cnt), bL=0.299*bR+0.587*bG+0.114*bB;
+  let dk=0, lt=0; for(let i=0;i<n;i++){ const dl=L[i]-bL; if(dl<-40) dk++; else if(dl>40) lt++; }
+  const dark=dk>=lt;   // штрихи темнее фона (бумага) или светлее (тёмный фон)
+  const BS=Math.max(24, Math.round(Math.max(W,H)/10)), nbx=Math.ceil(W/BS), nby=Math.ceil(H/BS), nb=nbx*nby;
+  const kR=new Float32Array(nb), kG=new Float32Array(nb), kB=new Float32Array(nb), kL=new Float32Array(nb), hist=new Uint32Array(256);
+  for(let by=0;by<nby;by++) for(let bx=0;bx<nbx;bx++){ hist.fill(0); let c=0; const x0=bx*BS, y0=by*BS, x1=Math.min(W,x0+BS), y1=Math.min(H,y0+BS);
+    for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){ hist[L[y*W+x]|0]++; c++; }
+    const q=dark? 0.85 : 0.15; let s=0, lev=0; for(let k=0;k<256;k++){ s+=hist[k]; if(s>=q*c){ lev=k; break; } }
+    let sr=0,sg=0,sb=0,m=0; for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){ const i=y*W+x; if(Math.abs(L[i]-lev)<=6){ sr+=R[i]; sg+=G[i]; sb+=B[i]; m++; } }
+    const o=by*nbx+bx; if(m){ kR[o]=sr/m; kG[o]=sg/m; kB[o]=sb/m; } else { kR[o]=bR; kG[o]=bG; kB[o]=bB; } kL[o]=0.299*kR[o]+0.587*kG[o]+0.114*kB[o]; }
+  { // медиана 3×3 по блокам: блок, целиком залитый толстым штрихом, берёт фон соседей
+    const mR=kR.slice(), mG=kG.slice(), mB=kB.slice(), mL=kL.slice();
+    for(let by=0;by<nby;by++) for(let bx=0;bx<nbx;bx++){ const ids=[];
+      for(let yy=Math.max(0,by-1); yy<=Math.min(nby-1,by+1); yy++) for(let xx=Math.max(0,bx-1); xx<=Math.min(nbx-1,bx+1); xx++) ids.push(yy*nbx+xx);
+      ids.sort((a,b)=>kL[a]-kL[b]); const j=ids[ids.length>>1], o=by*nbx+bx; mR[o]=kR[j]; mG[o]=kG[j]; mB[o]=kB[j]; mL[o]=kL[j]; }
+    kR.set(mR); kG.set(mG); kB.set(mB); kL.set(mL); }
+  const S=new Float32Array(n), sg=dark? 1 : -1;
+  for(let y=0;y<H;y++){ let gy=(y+0.5)/BS-0.5; if(gy<0) gy=0; if(gy>nby-1) gy=nby-1; const y0=Math.floor(gy), y1=Math.min(nby-1,y0+1), fy=gy-y0;
+    for(let x=0;x<W;x++){ let gx=(x+0.5)/BS-0.5; if(gx<0) gx=0; if(gx>nbx-1) gx=nbx-1; const x0=Math.floor(gx), x1=Math.min(nbx-1,x0+1), fx=gx-x0;
+      const a=y0*nbx+x0, b=y0*nbx+x1, c=y1*nbx+x0, e=y1*nbx+x1, w00=(1-fx)*(1-fy), w10=fx*(1-fy), w01=(1-fx)*fy, w11=fx*fy;
+      const gR=kR[a]*w00+kR[b]*w10+kR[c]*w01+kR[e]*w11, gG=kG[a]*w00+kG[b]*w10+kG[c]*w01+kG[e]*w11, gB=kB[a]*w00+kB[b]*w10+kB[c]*w01+kB[e]*w11, gL=0.299*gR+0.587*gG+0.114*gB;
+      const i=y*W+x; let s=sg*(gL-L[i]); if(s<0) s=0;
+      const dR=R[i]-gR, dG=G[i]-gG, dB=B[i]-gB, mm=(dR+dG+dB)/3;
+      S[i]=s+0.8*Math.hypot(dR-mm, dG-mm, dB-mm); } }
+  return {S, dark, bg:[bR,bG,bB]};
+}
+function _ikThreshold(S, W, H){   // Оцу по гистограмме чернильности, не ниже 0.3·p99.5 и 20; гистерезис: слабые пиксели при сильных соседях
+  const n=W*H, NB=512, h=new Float64Array(NB); for(let i=0;i<n;i++){ let v=S[i]|0; if(v>=NB) v=NB-1; h[v]++; }
+  let sum=0; for(let k=0;k<NB;k++) sum+=k*h[k];
+  let wB=0, sB=0, best=0, T=0; for(let k=0;k<NB;k++){ wB+=h[k]; if(!wB) continue; const wF=n-wB; if(!wF) break; sB+=k*h[k]; const mB=sB/wB, mF=(sum-sB)/wF, v=wB*wF*(mB-mF)*(mB-mF); if(v>best){ best=v; T=k; } }
+  let c=0, p995=0; for(let k=NB-1;k>=0;k--){ c+=h[k]; if(c>=0.005*n){ p995=k; break; } }
+  const thr=Math.max(T+0.5, 0.3*p995, 20), lo=0.55*thr, m=new Uint8Array(n), st=[];
+  for(let i=0;i<n;i++) if(S[i]>=thr){ m[i]=1; st.push(i); }
+  while(st.length){ const i=st.pop(), x=i%W, y=(i-x)/W;
+    for(let dy=-1;dy<=1;dy++){ const yy=y+dy; if(yy<0||yy>=H) continue; for(let dx=-1;dx<=1;dx++){ const xx=x+dx; if(xx<0||xx>=W) continue; const j=yy*W+xx; if(!m[j] && S[j]>=lo){ m[j]=1; st.push(j); } } } }
+  return {m, thr};
+}
+function _ikLabel(m, W, H, val, conn8){   // связные компоненты пикселей со значением val: метки, площади, касание края
+  const n=W*H, lab=new Int32Array(n).fill(-1), sizes=[], touch=[], st=[];
+  for(let s=0;s<n;s++){ if(m[s]!==val || lab[s]>=0) continue; const id=sizes.length; let sz=0, tb=false; lab[s]=id; st.push(s);
+    while(st.length){ const i=st.pop(); sz++; const x=i%W, y=(i-x)/W; if(x===0||y===0||x===W-1||y===H-1) tb=true;
+      for(let dy=-1;dy<=1;dy++){ const yy=y+dy; if(yy<0||yy>=H) continue; for(let dx=-1;dx<=1;dx++){ if(!dx&&!dy) continue; if(!conn8 && dx&&dy) continue; const xx=x+dx; if(xx<0||xx>=W) continue; const j=yy*W+xx; if(m[j]===val && lab[j]<0){ lab[j]=id; st.push(j); } } } }
+    sizes.push(sz); touch.push(tb); }
+  return {lab, sizes, touch};
+}
+function _ikDT(m, W, H){   // точное евклидово расстояние от пикселя чернил до фона (Фельценшвальб–Хуттенлохер)
+  const INF=1e20, n=W*H, M=Math.max(W,H), f=new Float64Array(M), dd=new Float64Array(M), v=new Int32Array(M), z=new Float64Array(M+1), D=new Float64Array(n);
+  for(let i=0;i<n;i++) D[i]=m[i]? INF : 0;
+  const edt=(len)=>{ let k=0; v[0]=0; z[0]=-INF; z[1]=INF;
+    for(let q=1;q<len;q++){ let s=((f[q]+q*q)-(f[v[k]]+v[k]*v[k]))/(2*q-2*v[k]); while(s<=z[k]){ k--; s=((f[q]+q*q)-(f[v[k]]+v[k]*v[k]))/(2*q-2*v[k]); } k++; v[k]=q; z[k]=s; z[k+1]=INF; }
+    k=0; for(let q=0;q<len;q++){ while(z[k+1]<q) k++; dd[q]=(q-v[k])*(q-v[k])+f[v[k]]; } };
+  for(let x=0;x<W;x++){ for(let y=0;y<H;y++) f[y]=D[y*W+x]; edt(H); for(let y=0;y<H;y++) D[y*W+x]=dd[y]; }
+  for(let y=0;y<H;y++){ for(let x=0;x<W;x++) f[x]=D[y*W+x]; edt(W); for(let x=0;x<W;x++) D[y*W+x]=dd[x]; }
+  const out=new Float32Array(n); for(let i=0;i<n;i++) out[i]=Math.sqrt(D[i]); return out;
+}
+function _ikThin(mp, W, H){   // скелет: Чжан–Суэнь по спискам кандидатов, затем снятие лишних «ступенек»; mp — поле (W+2)×(H+2) с нулевой рамкой, на месте
+  const Wp=W+2, OFF=[-Wp,-Wp+1,1,Wp+1,Wp,Wp-1,-1,-Wp-1];
+  let cand=[]; for(let y=1;y<=H;y++) for(let x=1;x<=W;x++){ const i=y*Wp+x; if(mp[i] && (!mp[i-1]||!mp[i+1]||!mp[i-Wp]||!mp[i+Wp])) cand.push(i); }
+  const stamp=new Uint32Array(mp.length); let gen=0;
+  for(let guard=0; guard<5000; guard++){ let any=false;
+    for(let sub=0; sub<2; sub++){ const del=[];
+      for(const i of cand){ if(!mp[i]) continue; const p2=mp[i-Wp],p3=mp[i-Wp+1],p4=mp[i+1],p5=mp[i+Wp+1],p6=mp[i+Wp],p7=mp[i+Wp-1],p8=mp[i-1],p9=mp[i-Wp-1];
+        const b=p2+p3+p4+p5+p6+p7+p8+p9; if(b<2||b>6) continue;
+        const a=(!p2&&p3)+(!p3&&p4)+(!p4&&p5)+(!p5&&p6)+(!p6&&p7)+(!p7&&p8)+(!p8&&p9)+(!p9&&p2); if(a!==1) continue;
+        if(sub===0? ((p2&&p4&&p6)||(p4&&p6&&p8)) : ((p2&&p4&&p8)||(p2&&p6&&p8))) continue;
+        del.push(i); }
+      if(!del.length) continue; any=true; gen++;
+      for(const i of del) mp[i]=0;
+      const nx=[]; for(const i of cand) if(mp[i] && stamp[i]!==gen){ stamp[i]=gen; nx.push(i); }
+      for(const i of del) for(const o of OFF){ const j=i+o; if(mp[j] && stamp[j]!==gen){ stamp[j]=gen; nx.push(j); } }
+      cand=nx; }
+    if(!any) break; }
+  const par=new Int8Array(8), fg=new Uint8Array(8), fnd=(k)=>{ while(par[k]!==k) k=par[k]; return k; }, uni=(a,b)=>{ a=fnd(a); b=fnd(b); if(a!==b) par[b]=a; };
+  for(let pass=0; pass<4; pass++){ let rm=0;
+    for(let y=1;y<=H;y++) for(let x=1;x<=W;x++){ const i=y*Wp+x; if(!mp[i]) continue;
+      let c=0; for(let k=0;k<8;k++){ fg[k]=mp[i+OFF[k]]; c+=fg[k]; par[k]=k; }
+      if(c<2) continue; if(fg[0]&&fg[2]&&fg[4]&&fg[6]) continue;   // все 4-соседи — чернила: удаление пробило бы дыру
+      for(let k=0;k<8;k++) if(fg[k]&&fg[(k+1)%8]) uni(k,(k+1)%8);
+      for(let k=0;k<8;k+=2) if(fg[k]&&fg[(k+2)%8]) uni(k,(k+2)%8);   // N–E, E–S, S–W, W–N — соседи по диагонали
+      let r=-1, groups=0; for(let k=0;k<8;k++) if(fg[k]){ const q=fnd(k); if(q!==r){ let seen=false; for(let t=0;t<k;t++) if(fg[t]&&fnd(t)===q){ seen=true; break; } if(!seen) groups++; r=q; } }
+      if(groups===1){ mp[i]=0; rm++; } }
+    if(!rm) break; }
+  return mp;
+}
+function _ikGraph(sk, W, H, DT){   // граф скелета: кластеры пикселей степени ≠2 — узлы, цепочки пикселей степени 2 — рёбра
+  const Wp=W+2, OFF=[-Wp,-Wp+1,1,Wp+1,Wp,Wp-1,-1,-Wp-1], np=sk.length;
+  const X=(i)=>i%Wp-1, Y=(i)=>((i/Wp)|0)-1, dtAt=(i)=>DT[Y(i)*W+X(i)];
+  const nb=new Uint8Array(np);
+  for(let y=1;y<=H;y++) for(let x=1;x<=W;x++){ const i=y*Wp+x; if(!sk[i]) continue; let c=0; for(const o of OFF) c+=sk[i+o]; nb[i]=c; }
+  const cl=new Int32Array(np).fill(-1), C=[];
+  for(let y=1;y<=H;y++) for(let x=1;x<=W;x++){ const s=y*Wp+x; if(!sk[s] || nb[s]===2 || cl[s]>=0) continue;
+    const id=C.length, pix=[s], st=[s]; cl[s]=id;
+    while(st.length){ const i=st.pop(); for(const o of OFF){ const j=i+o; if(sk[j] && nb[j]!==2 && cl[j]<0){ cl[j]=id; pix.push(j); st.push(j); } } }
+    let sx=0, sy=0, hw=0; for(const i of pix){ sx+=X(i); sy+=Y(i); hw=Math.max(hw, dtAt(i)); }
+    C.push({x:sx/pix.length, y:sy/pix.length, hw, n:pix.length}); }
+  const vis=new Uint8Array(np), E=[];
+  const mk=(P, a, b, loop)=>{ const xs=new Float32Array(P.length), ys=new Float32Array(P.length), hs=[];
+    for(let k=0;k<P.length;k++){ xs[k]=X(P[k]); ys[k]=Y(P[k]); hs.push(dtAt(P[k])); }
+    hs.sort((p,q)=>p-q); return {xs, ys, a, b, loop:!!loop, hw:hs.length? hs[hs.length>>1] : 1, alive:true}; };
+  const pixOf=new Map(); for(let y=1;y<=H;y++) for(let x=1;x<=W;x++){ const i=y*Wp+x; if(cl[i]>=0){ const c=cl[i]; if(!pixOf.has(c)) pixOf.set(c,[]); pixOf.get(c).push(i); } }
+  for(let c=0;c<C.length;c++) for(const p of (pixOf.get(c)||[])) for(const o of OFF){ const q=p+o; if(!sk[q] || cl[q]>=0 || vis[q]) continue;
+    const P=[q]; vis[q]=1; let prev=p, cur=q, end=-1;
+    for(let g=0; g<np; g++){ let nxt=-1;
+      for(const oo of OFF){ const r=cur+oo; if(r===prev || !sk[r]) continue; if(cl[r]>=0){ if(!(P.length===1 && cl[r]===c && r===p)){ end=r; break; } } else if(!vis[r] && nxt<0) nxt=r; }
+      if(end>=0 || nxt<0) break;
+      vis[nxt]=1; P.push(nxt); prev=cur; cur=nxt; }
+    E.push(mk(P, c, end>=0? cl[end] : -1, false)); }
+  for(let y=1;y<=H;y++) for(let x=1;x<=W;x++){ const s=y*Wp+x; if(!sk[s] || cl[s]>=0 || vis[s]) continue;   // замкнутые петли без узлов (окружность без пересечений)
+    const P=[s]; vis[s]=1; let cur=s;
+    for(let g=0; g<np; g++){ let nxt=-1; for(const o of OFF){ const r=cur+o; if(sk[r] && !vis[r] && cl[r]<0){ nxt=r; break; } } if(nxt<0) break; vis[nxt]=1; P.push(nxt); cur=nxt; }
+    E.push(mk(P, -1, -1, true)); }
+  return {C, E};
+}
+function _ikDir(e, s, C, c, o){   // направление ПРИХОДА по ребру e к его концу s (единичное); c, o — корни узлов этого и другого конца (−1 — нет)
+  const n=e.xs.length, skip=Math.min(n-1, Math.round(0.8*(c>=0? C[c].hw : e.hw))), k2=Math.min(n-1, skip+Math.max(3, Math.round(2.5*e.hw+2)));
+  const i1=s===0? skip : n-1-skip, i2=s===0? k2 : n-1-k2, qi=s===0? 0 : n-1;
+  let vx=e.xs[i1]-e.xs[i2], vy=e.ys[i1]-e.ys[i2];
+  if(Math.hypot(vx,vy)<1.5){ const px=c>=0? C[c].x : e.xs[qi], py=c>=0? C[c].y : e.ys[qi], ox=o>=0? C[o].x : e.xs[n-1-qi], oy=o>=0? C[o].y : e.ys[n-1-qi]; vx=px-ox; vy=py-oy; }
+  const L=Math.hypot(vx,vy); return L<1e-9? {x:1, y:0} : {x:vx/L, y:vy/L};
+}
+function _ikPrune(G){   // шпоры, короткие перемычки между развилками (X, распавшийся на два Y), мелкие петли и обрывки
+  const {C, E}=G, par=C.map((_,i)=>i), find=(i)=>{ while(par[i]!==i){ par[i]=par[par[i]]; i=par[i]; } return i; };
+  const deg=new Int32Array(C.length), len=(e)=>e.xs.length+1;
+  const recount=()=>{ deg.fill(0); for(const e of E) if(e.alive && !e.loop){ if(e.a>=0) deg[find(e.a)]++; if(e.b>=0) deg[find(e.b)]++; } };
+  const rev=(e)=>({xs:e.xs.slice().reverse(), ys:e.ys.slice().reverse()});
+  const dissolve=()=>{ recount(); const at=new Map(); let did=false;   // узел степени 2 — склейка двух рёбер в одно через его центр (длинные ветви — точные направления)
+    for(let ei=0; ei<E.length; ei++){ const e=E[ei]; if(!e.alive || e.loop) continue; for(let s=0;s<2;s++){ const c=s===0? e.a : e.b; if(c<0) continue; const r=find(c); if(!at.has(r)) at.set(r,[]); at.get(r).push({ei, s}); } }
+    for(const [r, L] of at){ if(L.length!==2) continue; const p=L[0], q=L[1], e1=E[p.ei], e2=E[q.ei]; if(!e1.alive || !e2.alive) continue; const cx=C[r].x, cy=C[r].y;
+      if(p.ei===q.ei){ const n=e1.xs.length, xs=new Float32Array(n+1), ys=new Float32Array(n+1); xs.set(e1.xs); ys.set(e1.ys); xs[n]=cx; ys[n]=cy; e1.alive=false; E.push({xs, ys, a:-1, b:-1, loop:true, hw:e1.hw, alive:true}); did=true; continue; }
+      const A1=p.s===0? rev(e1) : e1, B2=q.s===1? rev(e2) : e2, n1=A1.xs.length, n2=B2.xs.length, xs=new Float32Array(n1+1+n2), ys=new Float32Array(n1+1+n2);
+      xs.set(A1.xs,0); ys.set(A1.ys,0); xs[n1]=cx; ys[n1]=cy; xs.set(B2.xs,n1+1); ys.set(B2.ys,n1+1);
+      e1.alive=false; e2.alive=false; E.push({xs, ys, a:p.s===0? e1.b : e1.a, b:q.s===1? e2.a : e2.b, loop:false, hw:(e1.hw*n1+e2.hw*n2)/Math.max(1,n1+n2), alive:true}); did=true; }
+    return did; };
+  for(let outer=0; outer<200; outer++){
+  for(let guard=0; guard<10000; guard++){ recount(); let ch=false;
+    const adj=new Map(); for(const e of E) if(e.alive && !e.loop){ for(let s=0;s<2;s++){ const c=s===0? e.a : e.b; if(c<0) continue; const r=find(c); if(!adj.has(r)) adj.set(r,[]); adj.get(r).push({e, s}); } }
+    for(const e of E){ if(!e.alive) continue;
+      if(e.loop){ if(e.xs.length<Math.max(12, 6*e.hw)){ e.alive=false; ch=true; } continue; }
+      const A=e.a>=0? find(e.a) : -1, B=e.b>=0? find(e.b) : -1, L=len(e);
+      const dA=A>=0? deg[A] : 1, dB=B>=0? deg[B] : 1, hA=A>=0? C[A].hw : e.hw, hB=B>=0? C[B].hw : e.hw;
+      if(A>=0 && A===B){ if(L<Math.max(5, 4*hA)){ e.alive=false; ch=true; break; } continue; }            // крошечная петля на развилке (незалитая дырка)
+      if((dA===1 && dB>=3) || (dB===1 && dA>=3)){ const h=dA>=3? hA : hB; if(L<Math.max(3, 1.6*h+1)){ e.alive=false; ch=true; break; } }   // шпора
+      if(dA===3 && dB===3 && A>=0 && B>=0 && L>hA+hB+2 && L<=Math.max(hA+hB+2, 8*Math.max(hA,hB)+6)){   // вытянутый X: пологое пересечение, пряди слиты на длине перемычки
+        const ext=(X)=>(adj.get(X)||[]).filter(q=>q.e!==e), xa=ext(A), xb=ext(B);
+        if(xa.length===2 && xb.length===2){ const oth=(q)=>{ const c=q.s===0? q.e.b : q.e.a; return c>=0? find(c) : -1; };
+          const vmA=_ikDir(e,0,C,A,B), vmB=_ikDir(e,1,C,B,A), da=xa.map(q=>_ikDir(q.e,q.s,C,A,oth(q))), db=xb.map(q=>_ikDir(q.e,q.s,C,B,oth(q)));
+          const okA=da.every(v=>v.x*vmA.x+v.y*vmA.y<-0.3) && da[0].x*da[1].x+da[0].y*da[1].y>0.5, okB=db.every(v=>v.x*vmB.x+v.y*vmB.y<-0.3) && db[0].x*db[1].x+db[0].y*db[1].y>0.5;
+          if(okA && okB){ e.alive=false; C[A].x=(C[A].x+C[B].x)/2; C[A].y=(C[A].y+C[B].y)/2; C[A].n+=C[B].n; C[A].hw=Math.max(hA,hB); par[B]=A; ch=true; break; } } }
+      if(dA>=3 && dB>=3 && A>=0 && B>=0 && L<=hA+hB+2){ e.alive=false; const n1=C[A].n, n2=C[B].n;   // перемычка: одна развилка
+        C[A].x=(C[A].x*n1+C[B].x*n2)/(n1+n2); C[A].y=(C[A].y*n1+C[B].y*n2)/(n1+n2); C[A].n=n1+n2; C[A].hw=Math.max(hA,hB); par[B]=A; ch=true; break; }
+      if(dA<=1 && dB<=1 && L<Math.max(4, 1.2*Math.max(hA,hB))){ e.alive=false; ch=true; break; }          // соринка (короткий кусок нижней пряди между близкими разрывами толстого штриха — НЕ соринка: площадь уже отсеяна)
+    }
+    if(!ch) break; }
+  let d=false; while(dissolve()) d=true; if(!d) break; }
+  for(const e of E){ if(e.a>=0) e.a=find(e.a); if(e.b>=0) e.b=find(e.b); }
+  recount(); G.deg=deg; G.find=find;
+  return G;
+}
+function _ikEnds(G){   // концы рёбер: направление ПРИХОДА к узлу (единичное), точка у узла; ключ конца 2·e+s (s=0 — начало xs)
+  const {C, E}=G, ends=[];
+  for(let ei=0; ei<E.length; ei++){ const e=E[ei]; if(!e.alive || e.loop) continue; const n=e.xs.length;
+    for(let s=0;s<2;s++){ const c=s===0? e.a : e.b, o=s===0? e.b : e.a, qi=s===0? 0 : n-1, v=_ikDir(e, s, C, c, o);
+      ends.push({key:2*ei+s, e:ei, s, c, vx:v.x, vy:v.y, qx:e.xs[qi], qy:e.ys[qi], hw:e.hw}); } }
+  return ends;
+}
+function _ikPairs(idx, cost){   // наилучшее паросочетание чётного набора (перебор, ≤8 концов)
+  if(idx.length<2) return {c:0, P:[]}; const i=idx[0]; let best=null;
+  for(let t=1;t<idx.length;t++){ const rest=idx.slice(1,t).concat(idx.slice(t+1)), sub=_ikPairs(rest,cost), c=cost(i,idx[t])+sub.c; if(!best || c<best.c) best={c, P:[[i,idx[t]]].concat(sub.P)}; }
+  return best;
+}
+function _ikJunctions(G, ends){   // развилки: пары ветвей «навылет»; 3 ветви — T (нижняя прядь упирается в верхнюю), 4 — X без разрыва (над/под неизвестно)
+  const {C}=G, byC=new Map(), link=new Map(), recs=[], free=[];
+  for(const en of ends){ if(en.c<0){ free.push({x:en.qx, y:en.qy, tx:en.vx, ty:en.vy, hw:en.hw, key:en.key, stub:-1}); continue; } if(!byC.has(en.c)) byC.set(en.c,[]); byC.get(en.c).push(en); }
+  for(const [c, L] of byC){ const k=L.length, cc=C[c], r=cc.hw+2;
+    if(k===1){ free.push({x:cc.x, y:cc.y, tx:L[0].vx, ty:L[0].vy, hw:L[0].hw, key:L[0].key, stub:-1}); continue; }
+    const cost=(i,j)=>{ const A=L[i], B=L[j], dx=B.qx-A.qx, dy=B.qy-A.qy, off=Math.abs(dx*A.vy-dy*A.vx)+Math.abs(dx*B.vy-dy*B.vx); return 1+(A.vx*B.vx+A.vy*B.vy)+0.08*(off/r)*(off/r); };
+    let pairs=[], left=[];
+    if(k<=9){ const ids=[...Array(k).keys()];
+      if(k%2===0) pairs=_ikPairs(ids,cost).P;
+      else { let best=null; for(let l=0;l<k;l++){ const b=_ikPairs(ids.filter(x=>x!==l),cost); if(!best || b.c<best.c) best={c:b.c, P:b.P, l}; } pairs=best.P; left=[best.l]; } }
+    else { const all=[]; for(let i=0;i<k;i++) for(let j=i+1;j<k;j++) all.push([cost(i,j),i,j]); all.sort((a,b)=>a[0]-b[0]); const used=new Uint8Array(k);
+      for(const [,i,j] of all) if(!used[i] && !used[j]){ used[i]=used[j]=1; pairs.push([i,j]); } for(let i=0;i<k;i++) if(!used[i]) left.push(i); }
+    for(const [i,j] of pairs){ link.set(L[i].key, {to:L[j].key, kind:'pass', c}); link.set(L[j].key, {to:L[i].key, kind:'pass', c}); }
+    if(k===3){ const [i,j]=pairs[0], l=left[0]; let ox=L[i].vx-L[j].vx, oy=L[i].vy-L[j].vy; const lo=Math.hypot(ox,oy)||1;
+      recs.push({x:cc.x, y:cc.y, known:true, ox:ox/lo, oy:oy/lo, ux:L[l].vx, uy:L[l].vy, kind:'T'});
+      free.push({x:cc.x, y:cc.y, tx:L[l].vx, ty:L[l].vy, hw:L[l].hw, key:L[l].key, stub:recs.length-1}); }
+    else if(k>=4){ let [i,j]=pairs[0], [p,q]=pairs[1];
+      const stubby=(en)=>{ const e=G.E[en.e], far=en.s===0? e.b : e.a, fd=far>=0? (G.deg? G.deg[far]|0 : 1) : 1; return fd<=1 && e.xs.length<4*cc.hw+8; };   // короткая ветвь до свободного конца: разрыв нижней пряди сдвинут от узла
+      const s1=stubby(L[i])||stubby(L[j]), s2=stubby(L[p])||stubby(L[q]), kn=(k===4 && s1!==s2);
+      if(kn && s1){ [i,j,p,q]=[p,q,i,j]; }
+      let ox=L[i].vx-L[j].vx, oy=L[i].vy-L[j].vy, ux=L[p].vx-L[q].vx, uy=L[p].vy-L[q].vy; const lo=Math.hypot(ox,oy)||1, lu=Math.hypot(ux,uy)||1;
+      recs.push({x:cc.x, y:cc.y, known:kn, ox:ox/lo, oy:oy/lo, ux:ux/lu, uy:uy/lu, kind:kn? 'Xt' : 'X'});
+      for(const l of left) free.push({x:cc.x, y:cc.y, tx:L[l].vx, ty:L[l].vy, hw:L[l].hw, key:L[l].key, stub:recs.length-1}); } }
+  return {link, recs, free};
+}
+function _ikHermite(ax,ay,atx,aty,bx,by,btx,bty,L,step){   // мост: кубический Эрмит из конца a (касательная t_a) в конец b (приход против t_b)
+  const k=Math.max(2, Math.ceil(L/step)), m1x=atx*L, m1y=aty*L, m2x=-btx*L, m2y=-bty*L, out=[];
+  for(let s=0;s<=k;s++){ const t=s/k, t2=t*t, t3=t2*t, h00=2*t3-3*t2+1, h10=t3-2*t2+t, h01=-2*t3+3*t2, h11=t3-t2;
+    out.push([h00*ax+h10*m1x+h01*bx+h11*m2x, h00*ay+h10*m1y+h01*by+h11*m2y]); }
+  return out;
+}
+function _ikRuns(pts, mask, W, H){   // штрихи поперёк моста: серии «чернил» между первым и последним фоновым отсчётом
+  const f=new Uint8Array(pts.length); for(let k=0;k<pts.length;k++){ const x=Math.round(pts[k][0]), y=Math.round(pts[k][1]); f[k]=(x>=0&&y>=0&&x<W&&y<H)? mask[y*W+x] : 0; }
+  let i0=-1, i1=-1; for(let k=0;k<f.length;k++) if(!f[k]){ if(i0<0) i0=k; i1=k; }
+  const runs=[]; if(i0<0) return {runs, allInk:true};
+  let s=-1; for(let k=i0;k<=i1;k++){ if(f[k]){ if(s<0) s=k; } else if(s>=0){ runs.push([s,k-1]); s=-1; } }
+  return {runs, allInk:false};
+}
+function _ikMatch(F, mask, W, H, diag, hwMed){   // сшивка свободных концов: стоимость = длина × углы × (разрыв поперёк одного штриха — дёшево)
+  const nF=F.length, Lmax=Math.min(0.35*diag, 18*hwMed+24), cand=[], by=Array.from({length:nF},()=>[]);
+  const evalPair=(i,j,relax)=>{ const a=F[i], b=F[j], dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy);
+    if(L>(relax? 0.6*diag : Lmax)) return null;
+    let ai=1, aj=1; if(L>2){ const ux=dx/L, uy=dy/L; ai=a.tx*ux+a.ty*uy; aj=-(b.tx*ux+b.ty*uy); if(!relax && (ai<0.2 || aj<0.2)) return null; if(relax && (ai<-0.5 || aj<-0.5)) return null; }
+    const turn=1+(a.tx*b.tx+a.ty*b.ty), pts=_ikHermite(a.x,a.y,a.tx,a.ty,b.x,b.y,b.tx,b.ty,Math.max(L,1),1), pr=_ikRuns(pts,mask,W,H), nr=pr.runs.length, st=(a.stub>=0)+(b.stub>=0);
+    if(nr>=3 && !relax) return null;
+    let longRun=false; for(const r of pr.runs) if(r[1]-r[0]+1 > 6*hwMed+6) longRun=true;
+    let fac; if(st===2) fac=3; else if(st===1) fac=nr===0? 0.55 : 2.5; else if(nr===1) fac=longRun? 3 : 0.55; else if(nr===0) fac=(L<=2.5*(a.hw+b.hw)+6)? 0.8 : 2.2; else fac=(nr===2 && !longRun && ai>0.8 && aj>0.8 && turn<0.4)? 1.0 : 1.8+nr;   // два штриха подряд под одним разрывом (близкие пересечения) — если мост прямой
+    if(pr.allInk && st===0) fac=Math.max(fac, 1.2);
+    return {i, j, L, nr, pts, runs:pr.runs, cost:(L+2*hwMed)*(1+2*(1-ai)+2*(1-aj)+0.6*turn)*fac}; };
+  for(let i=0;i<nF;i++) for(let j=i+1;j<nF;j++){ const c=evalPair(i,j,false); if(c){ cand.push(c); by[i].push(c); by[j].push(c); } }
+  cand.sort((p,q)=>p.cost-q.cost);
+  const mate=new Int32Array(nF).fill(-1), pc=new Array(nF).fill(null);
+  const take=(c)=>{ mate[c.i]=c.j; mate[c.j]=c.i; pc[c.i]=pc[c.j]=c; }, drop=(c)=>{ mate[c.i]=mate[c.j]=-1; pc[c.i]=pc[c.j]=null; };
+  for(const c of cand) if(mate[c.i]<0 && mate[c.j]<0) take(c);
+  const get=(i,j)=>{ for(const c of by[i]) if((c.i===i&&c.j===j)||(c.i===j&&c.j===i)) return c; return null; };
+  for(let round=0; round<6; round++){ let imp=false;   // 2-opt: (a,b)+(c,d) → (a,c)+(b,d)
+    for(let a=0;a<nF;a++){ const ab=pc[a]; if(!ab) continue; const b=mate[a];
+      for(const ac of by[a]){ const c=ac.i===a? ac.j : ac.i; if(c===b) continue; const d=mate[c];
+        if(d<0){ if(ac.cost<ab.cost){ drop(ab); take(ac); imp=true; break; } continue; }
+        const cd=pc[c], bd=get(b,d); if(!bd || d===a) continue;
+        if(ac.cost+bd.cost < ab.cost+cd.cost-1e-9){ drop(ab); drop(cd); take(ac); take(bd); imp=true; break; } } }
+    if(!imp) break; }
+  const lone=[]; for(let i=0;i<nF;i++) if(mate[i]<0) lone.push(i);   // остатки — с ослабленными условиями
+  if(lone.length>=2){ const rc=[]; for(let x=0;x<lone.length;x++) for(let y=x+1;y<lone.length;y++){ const c=evalPair(lone[x],lone[y],true); if(c) rc.push(c); }
+    rc.sort((p,q)=>p.cost-q.cost); for(const c of rc) if(mate[c.i]<0 && mate[c.j]<0){ c.relaxed=true; take(c); } }
+  const out=[]; for(let i=0;i<nF;i++) if(pc[i] && pc[i].i===i) out.push(pc[i]);
+  return {pairs:out, lone:[...Array(nF).keys()].filter(i=>mate[i]<0)};
+}
+function _ikPCA(skp, W, H, x, y, r, ex){   // главная ось пикселей скелета в круге r около (x,y), без пикселей у концов моста
+  const Wp=W+2; let n=0, sx=0, sy=0, sxx=0, syy=0, sxy=0;
+  for(let yy=Math.max(0,Math.floor(y-r)); yy<=Math.min(H-1,Math.ceil(y+r)); yy++) for(let xx=Math.max(0,Math.floor(x-r)); xx<=Math.min(W-1,Math.ceil(x+r)); xx++){
+    if(!skp[(yy+1)*Wp+xx+1]) continue; const dx=xx-x, dy=yy-y; if(dx*dx+dy*dy>r*r) continue;
+    let bad=false; for(const q of ex) if((xx-q[0])*(xx-q[0])+(yy-q[1])*(yy-q[1])<q[2]*q[2]){ bad=true; break; } if(bad) continue;
+    n++; sx+=xx; sy+=yy; sxx+=xx*xx; syy+=yy*yy; sxy+=xx*yy; }
+  if(n<3) return null; const mx=sx/n, my=sy/n, cxx=sxx/n-mx*mx, cyy=syy/n-my*my, cxy=sxy/n-mx*my, a=0.5*Math.atan2(2*cxy, cxx-cyy);
+  return {x:Math.cos(a), y:Math.sin(a)};
+}
+function _ikCycles(E, link){   // обход: ребро → звено у выхода (проход через развилку или мост) → следующее ребро
+  const used=new Uint8Array(E.length), comps=[];
+  for(let e0=0;e0<E.length;e0++){ if(!E[e0].alive || used[e0]) continue; used[e0]=1;
+    if(E[e0].loop){ comps.push({seq:[{e:e0, sIn:0, via:null}], closed:true}); continue; }
+    const seq=[{e:e0, sIn:0, via:null}]; let closed=false, cur=seq[0];
+    for(;;){ const lk=link.get(2*cur.e+(1-cur.sIn)); if(!lk) break; const e2=lk.to>>1, s2=lk.to&1;
+      if(e2===e0 && s2===0){ seq[0].via=lk; closed=true; break; } if(used[e2]) break; used[e2]=1; cur={e:e2, sIn:s2, via:lk}; seq.push(cur); }
+    if(!closed){ let head=seq[0];
+      for(;;){ const lk=link.get(2*head.e+head.sIn); if(!lk) break; const e2=lk.to>>1, s2=lk.to&1; if(used[e2]) break; used[e2]=1;
+        head.via=link.get(lk.to); const nh={e:e2, sIn:1-s2, via:null}; seq.unshift(nh); head=nh; } }
+    let len=0; for(const it of seq){ len+=E[it.e].xs.length; if(it.via && it.via.kind==='bridge') len+=it.via.L; }
+    comps.push({seq, closed, len}); }
+  return comps;
+}
+function _ikAssemble(comp, E, C){
+  const out=[], via=(lk)=>{ if(!lk) return; if(lk.kind==='pass'){ out.push([C[lk.c].x, C[lk.c].y]); } else for(const p of lk.pts) out.push(p); };
+  comp.seq.forEach((it,k)=>{ if(k>0) via(it.via); const e=E[it.e], n=e.xs.length;
+    if(it.sIn===0) for(let t=0;t<n;t++) out.push([e.xs[t],e.ys[t]]); else for(let t=n-1;t>=0;t--) out.push([e.xs[t],e.ys[t]]); });
+  if(comp.closed) via(comp.seq[0].via);
+  return out;
+}
+function _ikSmooth(poly, sigma, step){   // равномерный ресэмпл 1 px → циклический гаусс σ → шаг step
+  const n=poly.length; if(n<4) return null;
+  const cum=[0]; for(let i=1;i<=n;i++){ const a=poly[i-1], b=poly[i%n]; cum.push(cum[i-1]+Math.hypot(b[0]-a[0], b[1]-a[1])); }
+  const T=cum[n]; if(T<12) return null; const m=Math.max(16, Math.round(T)), Q=new Float64Array(2*m); let j=0;
+  for(let k=0;k<m;k++){ const s=k*T/m; while(j<n-1 && cum[j+1]<s) j++; const a=poly[j], b=poly[(j+1)%n], sl=cum[j+1]-cum[j], t=sl>1e-9? (s-cum[j])/sl : 0; Q[2*k]=a[0]+(b[0]-a[0])*t; Q[2*k+1]=a[1]+(b[1]-a[1])*t; }
+  const rad=Math.ceil(3*sigma), wt=[]; let ws=0; for(let d=-rad; d<=rad; d++){ const w=Math.exp(-d*d/(2*sigma*sigma)); wt.push(w); ws+=w; }
+  const S=new Float64Array(2*m); for(let k=0;k<m;k++){ let sx=0, sy=0; for(let d=-rad; d<=rad; d++){ const q=((k+d)%m+m)%m, w=wt[d+rad]; sx+=w*Q[2*q]; sy+=w*Q[2*q+1]; } S[2*k]=sx/ws; S[2*k+1]=sy/ws; }
+  const cnt=Math.max(8, Math.round(T/step)), out=[];
+  for(let k=0;k<cnt;k++){ const idx=k*m/cnt, i0=Math.floor(idx), fr=idx-i0, i1=(i0+1)%m; out.push({x:S[2*i0]+(S[2*i1]-S[2*i0])*fr, y:S[2*i0+1]+(S[2*i1+1]-S[2*i0+1])*fr}); }
+  return out;
+}
+function ikRecognize(img){   // → {ok, msg, pts (рабочие px), recs (пересечения: known — над/под из картинки), hw, W, H, f, mask, notes}
+  const t0=Date.now(), P=_ikPrep(img), W=P.W, H=P.H, n=W*H, ink=_ikInk(P), m=_ikThreshold(ink.S, W, H).m;
+  const lab=_ikLabel(m, W, H, 1, true), amin=Math.max(8, Math.round(n*2e-5)); let inkN=0;
+  for(let i=0;i<n;i++){ if(m[i] && lab.sizes[lab.lab[i]]<amin) m[i]=0; if(m[i]) inkN++; }
+  if(inkN<30) return {ok:false, msg:'no strokes found'};
+  if(inkN>0.5*n) return {ok:false, msg:'no line drawing found (the picture is mostly dark/filled)'};
+  let DT=_ikDT(m, W, H); { const h=new Uint32Array(256); for(let i=0;i<n;i++) if(m[i]) h[Math.min(255, Math.round(DT[i]))]++; let s=0, md=1; for(let k=0;k<256;k++){ s+=h[k]; if(2*s>=inkN){ md=k; break; } }
+    const hw0=Math.max(1, 2*md), bl=_ikLabel(m, W, H, 0, false), hmax=Math.max(4, 2.5*hw0*hw0); let filled=0;
+    for(let i=0;i<n;i++) if(!m[i]){ const id=bl.lab[i]; if(!bl.touch[id] && bl.sizes[id]<hmax){ m[i]=1; filled++; } }
+    if(filled) DT=_ikDT(m, W, H); }
+  const Wp=W+2, skp=new Uint8Array(Wp*(H+2)); for(let y=0;y<H;y++) for(let x=0;x<W;x++) skp[(y+1)*Wp+x+1]=m[y*W+x];
+  _ikThin(skp, W, H);
+  const G=_ikPrune(_ikGraph(skp, W, H, DT));
+  let hwS=0, hwN=0, minx=1e9, maxx=-1e9, miny=1e9, maxy=-1e9;
+  for(const e of G.E) if(e.alive){ hwS+=e.hw*e.xs.length; hwN+=e.xs.length; for(let k=0;k<e.xs.length;k++){ const x=e.xs[k], y=e.ys[k]; if(x<minx)minx=x; if(x>maxx)maxx=x; if(y<miny)miny=y; if(y>maxy)maxy=y; } }
+  if(hwN<20) return {ok:false, msg:'no strokes found'};
+  const hwMed=Math.max(1, hwS/hwN), diag=Math.hypot(maxx-minx, maxy-miny);
+  { // короткий кусок штриха без рёбер скелета (нижняя прядь между близкими разрывами толстого штриха стягивается в точку) — ребро-отрезок вдоль главной оси
+    const L2=_ikLabel(m, W, H, 1, true), nc=L2.sizes.length, has=new Uint8Array(nc), amin2=Math.max(12, 3*hwMed*hwMed), st=new Float64Array(nc*6), ax=new Map();
+    for(const e of G.E) if(e.alive){ const x=Math.round(e.xs[0]), y=Math.round(e.ys[0]); if(x>=0&&y>=0&&x<W&&y<H){ const id=L2.lab[y*W+x]; if(id>=0) has[id]=1; } }
+    for(let i=0;i<n;i++){ const id=L2.lab[i]; if(id<0 || has[id] || L2.sizes[id]<amin2 || L2.touch[id]) continue; const x=i%W, y=(i-x)/W, o=6*id; st[o]++; st[o+1]+=x; st[o+2]+=y; st[o+3]+=x*x; st[o+4]+=y*y; st[o+5]+=x*y; }
+    for(let id=0;id<nc;id++){ const o=6*id, k=st[o]; if(!k) continue; const mx=st[o+1]/k, my=st[o+2]/k, cxx=st[o+3]/k-mx*mx, cyy=st[o+4]/k-my*my, cxy=st[o+5]/k-mx*my, dt=Math.sqrt(Math.max(0,(cxx-cyy)*(cxx-cyy)/4+cxy*cxy)), l1=(cxx+cyy)/2+dt, l2=(cxx+cyy)/2-dt;
+      if(l1<1.8*Math.max(l2,0.25)) continue; const a=0.5*Math.atan2(2*cxy, cxx-cyy); ax.set(id, {mx, my, dx:Math.cos(a), dy:Math.sin(a), lo:1e9, hi:-1e9}); }
+    if(ax.size){ for(let i=0;i<n;i++){ const A=ax.get(L2.lab[i]); if(!A) continue; const x=i%W, y=(i-x)/W, t=(x-A.mx)*A.dx+(y-A.my)*A.dy; if(t<A.lo) A.lo=t; if(t>A.hi) A.hi=t; }
+      for(const A of ax.values()){ const a0=Math.min(A.lo+0.8*hwMed, -0.5), a1=Math.max(A.hi-0.8*hwMed, 0.5), len=Math.max(2, Math.round(a1-a0)), xs=new Float32Array(len+1), ys=new Float32Array(len+1);
+        for(let k=0;k<=len;k++){ const t=a0+(a1-a0)*k/len; xs[k]=A.mx+A.dx*t; ys[k]=A.my+A.dy*t; }
+        G.E.push({xs, ys, a:-1, b:-1, loop:false, hw:hwMed, alive:true, dash:true}); } } }
+  const ends=_ikEnds(G), J=_ikJunctions(G, ends), link=J.link, recs=J.recs;
+  for(const r of recs){ if(r.kind!=='X') continue;   // крест без разрыва на маске: если нижняя прядь лишь касается верхней, вдоль неё остаётся светлый шов
+    const R=Math.max(3, Math.round(2*hwMed+2)), mn=(dx,dy)=>{ let v=Infinity; for(let t=-R;t<=R;t++){ const x=Math.round(r.x+dx*t), y=Math.round(r.y+dy*t); if(x>=0&&y>=0&&x<W&&y<H){ const s=ink.S[y*W+x]; if(s<v) v=s; } } return v; };
+    const mo=mn(r.ox,r.oy), mu=mn(r.ux,r.uy), hi=Math.max(mo,mu), lo=Math.min(mo,mu);
+    if(hi>0 && lo<0.6*hi){ r.known=true; r.kind='Xs'; if(mo<mu){ const tx=r.ox, ty=r.oy; r.ox=r.ux; r.oy=r.uy; r.ux=tx; r.uy=ty; } } }
+  for(const r of recs) r.edge=-1;
+  { const byKey=new Map(); for(const en of ends) byKey.set(en.key, en); for(const r of recs){ } for(const fr of J.free) if(fr.stub>=0) recs[fr.stub].edge=fr.key>>1;
+    for(const [key, lk] of link) if(lk.kind==='pass'){ for(const r of recs) if(r.edge<0 && r.kind==='X' && Math.abs(r.x-G.C[lk.c].x)<1e-6 && Math.abs(r.y-G.C[lk.c].y)<1e-6) r.edge=key>>1; } }
+  const M=_ikMatch(J.free, m, W, H, diag, hwMed); let relaxed=0;
+  for(const c of M.pairs){ const a=J.free[c.i], b=J.free[c.j]; if(c.relaxed) relaxed++;
+    link.set(a.key, {to:b.key, kind:'bridge', pts:c.pts, L:c.L}); link.set(b.key, {to:a.key, kind:'bridge', pts:c.pts.slice().reverse(), L:c.L});
+    if(a.stub<0 && b.stub<0) for(const rn of c.runs){ const mi=(rn[0]+rn[1])>>1, p=c.pts[mi], p0=c.pts[Math.max(0,mi-2)], p1=c.pts[Math.min(c.pts.length-1,mi+2)];
+      let ux=p1[0]-p0[0], uy=p1[1]-p0[1]; const lu=Math.hypot(ux,uy)||1; ux/=lu; uy/=lu;
+      const o=_ikPCA(skp, W, H, p[0], p[1], 2*hwMed+3, [[a.x,a.y,a.hw+2],[b.x,b.y,b.hw+2]]) || {x:-uy, y:ux};
+      recs.push({x:p[0], y:p[1], known:true, ox:o.x, oy:o.y, ux, uy, kind:'gap', edge:a.key>>1}); } }
+  const comps=_ikCycles(G.E, link); if(!comps.length) return {ok:false, msg:'no curve found'};
+  comps.sort((p,q)=>q.len-p.len); const main=comps[0], big=comps.filter(c=>c.len>0.15*main.len).length;
+  let poly=_ikAssemble(main, G.E, G.C);
+  if(!main.closed && poly.length>2){ const a=poly[poly.length-1], a0=poly[Math.max(0,poly.length-6)], b=poly[0], b0=poly[Math.min(poly.length-1,5)];
+    let atx=a[0]-a0[0], aty=a[1]-a0[1], btx=b[0]-b0[0], bty=b[1]-b0[1]; const la=Math.hypot(atx,aty)||1, lb=Math.hypot(btx,bty)||1, L=Math.hypot(b[0]-a[0], b[1]-a[1]);
+    poly=poly.concat(_ikHermite(a[0],a[1],atx/la,aty/la,b[0],b[1],btx/lb,bty/lb,Math.max(L,1),1.5).slice(1,-1)); }
+  const pts=_ikSmooth(poly, Math.max(1.2, 0.6*hwMed), 2.5); if(!pts) return {ok:false, msg:'the recognised curve is too short'};
+  const inMain=new Set(main.seq.map(it=>it.e)), rs=recs.filter(r=>inMain.has(r.edge));
+  const dbg=(typeof window!=='undefined' && window.__ikDebug)? {skp, G, free:J.free, pairs:M.pairs, main, poly, comps} : undefined;
+  return {ok:true, dbg, pts, recs:rs, hw:hwMed, W, H, f:P.f, mask:m, dark:ink.dark, ms:Date.now()-t0,
+    notes:{comps:big, open:!main.closed, lone:M.lone.length, relaxed, known:rs.filter(r=>r.known).length, unknown:rs.filter(r=>!r.known).length}};
+}
+function ikApply(res){   // распознанное → редактор: кривая, над/под (из разрывов; без разрыва — чередование), подложка, статус
+  if(!res || !res.ok){ setStatus('image: '+((res && res.msg)||'not recognised')); return {ok:false, msg:res && res.msg}; }
+  document.getElementById('clear').onclick();
+  let minx=1e9, maxx=-1e9, miny=1e9, maxy=-1e9; for(const p of res.pts){ if(p.x<minx)minx=p.x; if(p.x>maxx)maxx=p.x; if(p.y<miny)miny=p.y; if(p.y>maxy)maxy=p.y; }
+  const cw=(drawCv.clientWidth>4)?drawCv.clientWidth:((drawCv.width>4)?drawCv.width:800), ch=(drawCv.clientHeight>4)?drawCv.clientHeight:((drawCv.height>4)?drawCv.height:600);
+  const k=Math.min(cw*0.86/Math.max(1,maxx-minx), ch*0.86/Math.max(1,maxy-miny)), ox=cw/2-k*(minx+maxx)/2, oy=ch/2-k*(miny+maxy)/2;
+  raw=res.pts.map(p=>({x:p.x*k+ox, y:p.y*k+oy})); closedCurve=false; drawing=false; finishCurve(true);
+  if(!closedCurve){ setStatus('image: the recognised curve is too short'); return {ok:false, msg:'short'}; }
+  const R=res.recs.map(r=>({x:r.x*k+ox, y:r.y*k+oy, known:r.known, ox:r.ox, oy:r.oy, ux:r.ux, uy:r.uy}));
+  const tol=Math.max(10, (2.5*res.hw+6)*k), groups=new Map(), none=[], rest=[]; let known=0, bigon=0;
+  for(const c of crossings){ let bi=-1, bd=tol; R.forEach((r,ri)=>{ const d=Math.hypot(r.x-c.x, r.y-c.y); if(d<bd){ bd=d; bi=ri; } }); if(bi<0) none.push(c); else { if(!groups.has(bi)) groups.set(bi,[]); groups.get(bi).push(c); } }
+  const arcPair=(a,b)=>Math.min(arcDist2D(a.sA,b.sA)+arcDist2D(a.sB,b.sB), arcDist2D(a.sA,b.sB)+arcDist2D(a.sB,b.sA));
+  const same=(a,b)=>{ if(arcDist2D(a.sA,b.sA)+arcDist2D(a.sB,b.sB)<=arcDist2D(a.sA,b.sB)+arcDist2D(a.sB,b.sA)){ a.over='A'; b.over='A'; } else { a.over='A'; b.over='B'; } a._ikFix=b._ikFix=true; bigon+=2; };   // лишняя пара от сглаживания (бигон): одна прядь сверху в обоих — тип не меняется
+  const setFrom=(c,r)=>{ if(r.known){ const sc=(d)=>Math.abs(d.x*r.ox+d.y*r.oy)-Math.abs(d.x*r.ux+d.y*r.uy); c.over=sc(c.dirA)>=sc(c.dirB)? 'A' : 'B'; c._ikFix=c._ikKnown=true; known++; } else rest.push(c); };
+  for(const [ri, L] of groups){ const r=R[ri];
+    if(L.length===1){ setFrom(L[0], r); continue; }
+    L.sort((p,q)=>p.sA-q.sA); if(L.length%2===1) setFrom(L.splice(L.length>>1,1)[0], r);   // нечётная группа: среднее — настоящее пересечение записи
+    while(L.length>=2){ const a=L.shift(); let bj=0, bd=Infinity; L.forEach((b,j)=>{ const d=arcPair(a,b); if(d<bd){ bd=d; bj=j; } }); same(a, L.splice(bj,1)[0]); } }
+  const dS=Math.max(30, 8*res.hw*k);
+  for(let i=0;i<none.length;i++){ const a=none[i]; if(a._ikFix) continue; for(let j=i+1;j<none.length;j++){ const b=none[j]; if(!b._ikFix && arcPair(a,b)<2*dS){ same(a,b); break; } } }
+  for(const c of none) if(!c._ikFix) rest.push(c);
+  if(rest.length){ const alt=new Map(), vis=[]; crossings.forEach((c,ci)=>{ vis.push({s:c.sA,ci,side:'A'}); vis.push({s:c.sB,ci,side:'B'}); }); vis.sort((p,q)=>p.s-q.s);
+    let o=true; for(const v of vis){ if(o) alt.set(v.ci, v.side); else if(!alt.has(v.ci)) alt.set(v.ci, v.side==='A'?'B':'A'); o=!o; }
+    let agree=0, dis=0; crossings.forEach((c,ci)=>{ if(!c._ikKnown) return; if(alt.get(ci)===c.over) agree++; else dis++; });
+    const flip=dis>agree; for(const c of rest){ const v=alt.get(crossings.indexOf(c)); c.over=flip? (v==='A'?'B':'A') : v; } }
+  for(const c of crossings){ delete c._ikFix; delete c._ikKnown; }
+  updateKnotType(); updateCrossInfo();
+  _ikUnder=null;
+  try{ if(!(typeof window!=='undefined' && window.__isWorker)){ const cv=document.createElement('canvas'); cv.width=res.W; cv.height=res.H; const cx=cv.getContext('2d'), id=cx.createImageData(res.W, res.H);
+    for(let i=0;i<res.W*res.H;i++) if(res.mask[i]){ id.data[4*i]=175; id.data[4*i+1]=190; id.data[4*i+2]=215; id.data[4*i+3]=255; }
+    cx.putImageData(id,0,0); _ikUnder={cv, x:ox, y:oy, w:res.W*k, h:res.H*k}; } }catch(e){ _ikUnder=null; }
+  renderDraw(); syncKnot3D();
+  const nc=crossings.length, alt=rest.length, nt=res.notes||{};
+  setStatus('image: '+nc+' crossing'+(nc===1?'':'s')+' · '+(isUnknot?'unknot':'det '+knotDet)
+    +(alt? ' · ⚠ '+alt+' without a visible gap — set alternating, click to flip' : '')
+    +(nt.comps>1? ' · ⚠ '+nt.comps+' separate curves (a link?) — loaded the longest' : '')
+    +(nt.open? ' · ⚠ open ends joined' : '')+' · press ▶ Physics');
+  return {ok:true, nc, known, alt, bigon, det:knotDet, k, ox, oy};
+}
+async function ikLoadFile(file){   // файл (кнопка Image, перетаскивание, вставка) → ImageData ≤1600 px → распознавание → редактор
+  if(!file) return;
+  if(!/^image\//.test(file.type||'') && !/\.(png|jpe?g|gif|webp|bmp|svg|avif|heic|heif)$/i.test(file.name||'')){ setStatus('image: not an image file'); return; }
+  setStatus('image: recognising…');
+  const url=URL.createObjectURL(file);
+  try{
+    const im=await new Promise((ok,no)=>{ const x=new Image(); x.onload=()=>ok(x); x.onerror=()=>no(new Error('the browser cannot decode this file')); x.src=url; });
+    let W0=im.naturalWidth||im.width||0, H0=im.naturalHeight||im.height||0; if(!(W0>0 && H0>0)){ W0=1000; H0=1000; }
+    const sc=Math.min(1, 1600/Math.max(W0,H0)), W=Math.max(8, Math.round(W0*sc)), H=Math.max(8, Math.round(H0*sc));
+    const cv=document.createElement('canvas'); cv.width=W; cv.height=H; const cx=cv.getContext('2d', {willReadFrequently:true}); cx.drawImage(im, 0, 0, W, H);
+    const data=cx.getImageData(0, 0, W, H);
+    await new Promise(r=>setTimeout(r, 20));   // статус «recognising…» успевает отрисоваться
+    const res=ikRecognize(data); window.__ikLast=res && {ok:res.ok, msg:res.msg, ms:res.ms, notes:res.notes, W:res.W, H:res.H, hw:res.hw};
+    ikApply(res);
+  }catch(e){ setStatus('image: '+((e && e.message)||e)); }
+  finally{ URL.revokeObjectURL(url); }
+}
+if(typeof window!=='undefined' && !window.__isWorker){   // кнопка Image, перетаскивание файла на левую панель, вставка картинки из буфера (⌘V)
+  const btn=document.getElementById('imgLoad'), inp=document.getElementById('imgFile');
+  if(btn && inp){ btn.onclick=()=>{ try{ inp.value=''; }catch(e){} if(inp.click) inp.click(); }; inp.onchange=()=>{ const f=inp.files && inp.files[0]; if(f) ikLoadFile(f); }; }
+  const left=document.getElementById('left');
+  if(left && left.addEventListener){ const hasFile=(e)=>{ const t=e.dataTransfer && e.dataTransfer.types; return !!t && Array.prototype.indexOf.call(t, 'Files')>=0; };
+    left.addEventListener('dragover', e=>{ if(!hasFile(e)) return; e.preventDefault(); left.classList.add('imgDrop'); });
+    left.addEventListener('dragleave', e=>{ if(!e.relatedTarget || !left.contains(e.relatedTarget)) left.classList.remove('imgDrop'); });
+    left.addEventListener('drop', e=>{ if(!hasFile(e)) return; e.preventDefault(); left.classList.remove('imgDrop'); const fs=[...e.dataTransfer.files]; ikLoadFile(fs.find(x=>/^image\//.test(x.type)) || fs[0]); }); }
+  if(window.addEventListener) window.addEventListener('paste', e=>{ const it=e.clipboardData && e.clipboardData.items; if(!it) return;
+    for(const x of it){ if(x.kind==='file' && /^image\//.test(x.type)){ const f=x.getAsFile(); if(f){ e.preventDefault(); ikLoadFile(f); } return; } } });
+}
 
 // --- чередующееся над/под: проходим кривую и поочерёдно «над/под» на каждом
 //     встреченном пересечении. Нужно для неторических узлов (восьмёрка). ---
@@ -801,7 +1235,7 @@ function _gdCurve(P, n, rnd, gW, theta, ax, ay){
 }
 function randomKnot(target){
   target=Math.max(1, Math.min(250, Math.round(target||20)));   // лимит 250 (2026-09-14)
-  if(running) stopPhysics('');
+  if(running) stopPhysics(''); _ikUnder=null;
   let seed=(Math.floor(Math.random()*2147483647))|1;
   const rnd=()=>{ seed=(Math.imul(seed,1103515245)+12345)&0x7fffffff; return seed/0x80000000; };   // строго <1
   const SEP=1.5*CROSS_R, FILL=0.9;
@@ -837,7 +1271,7 @@ function randomKnot(target){
     +(crossings.length!==target ? ' · ⚠ requested '+target+(nHi>=nMax ? ' (window limit '+nMax+'×'+nMax+')' : ' (no exact grid found)') : '')+(ok?'':' · ⚠ crossings closer than 1.5 marker radii')+' · press ▶ Physics');
 }
 function loadPreset(key){
-  const P=PRESETS[key]; if(!P) return;
+  const P=PRESETS[key]; if(!P) return; _ikUnder=null;
   raw=fitToCanvas(P.pts());
   closedCurve=false; drawing=false;
   finishCurve(true);                     // строит 2D-диаграмму и 3D через лифт
@@ -4339,7 +4773,7 @@ window.__knotSetVerts=(arr)=>{ if(!arr||arr.length<8) return false; _liftFromDia
   N=verts.length; allocBuffers(); resampleEqualArc(); recenter();
   rebuildTube(); fitCamera(false); return {N,L0:+L0.toFixed(5)}; };
 // ВЕРСИЯ ИНТЕРФЕЙСА: X задаёт пользователь, Y растёт на 1 с каждой новой сборкой
-const APP_VER_MAJOR=3, APP_VER_MINOR=3;   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
+const APP_VER_MAJOR=3, APP_VER_MINOR=4;   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
 const APP_VERSION=APP_VER_MAJOR+'.'+APP_VER_MINOR;   // 3.0, 3.1, … (с 3.0 без дополнения нулём)
 window.__buildTag='v'+APP_VERSION;
 { const el=document.getElementById('appVer'); if(el) el.textContent=APP_VERSION; }
