@@ -278,7 +278,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   <!-- ================= LEFT: 2D drawing ================= -->
   <div id="left" class="pane">
     <div class="topbar">
-      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.4</span></span>
+      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.5</span></span>
       <button id="restoreLast" title="Restore the last drawing from telemetry">Last</button><button id="clear" class="ghost">Clear</button>
       <span class="seg" id="presets" title="Example knots">
         <button class="ex" data-knot="trefoil" title="Trefoil 3₁">3₁</button>
@@ -331,31 +331,19 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
 <script>
 "use strict";
 const __PAGE_SRC=(typeof document!=="undefined" && document.currentScript && document.currentScript.textContent) || "";   // исходник этой страницы — для безголовых копий в Web Worker (2.11)
-// ---- ВИДИМЫЙ РЕПОРТЁР ОШИБОК: любая JS-ошибка показывается на странице ----
-// (иначе «не запускается» выглядит как мёртвая страница без объяснений)
+// ---- РЕПОРТЁР ОШИБОК (3.5): непойманная JS-ошибка — в стандартном окне сообщений, как у системной программы ----
+// (иначе «не запускается» выглядит как мёртвая страница без объяснений). Одинаковые сообщения — одно окно; не больше 3 окон за сеанс, остальное — в консоль
 window.addEventListener('error', function(ev){
   try{
-    let el=document.getElementById('errBanner');
-    if(!el){
-      el=document.createElement('div');
-      el.id='errBanner';
-      el.style.cssText='position:fixed;left:10px;bottom:10px;right:10px;z-index:9999;'+
-        'background:#5c1a1a;color:#ffd7d7;border:1px solid #a33;border-radius:8px;'+
-        'padding:8px 12px;font:12px/1.5 monospace;white-space:pre-wrap;max-height:40%;overflow:auto';
-      (document.body||document.documentElement).appendChild(el);
-    }
-    el.textContent += 'ERROR: '+(ev.message||ev.error)+'\n  '+(ev.filename||'')+':'+(ev.lineno||'')+'\n';
+    const msg=String(ev.message||ev.error||'unknown error'), where=ev.filename? '\n'+ev.filename+':'+(ev.lineno||'') : '';
+    const seen=window.__errSeen||(window.__errSeen={}); if(seen[msg]) return; seen[msg]=1;
+    if(Object.keys(seen).length>3 || window.__isWorker || typeof window.alert!=='function') return;
+    setTimeout(function(){ try{ window.alert('Program error: '+msg+where); }catch(e){} }, 0);
   }catch(e){}
 });
 if(typeof THREE==='undefined'){
-  document.addEventListener('DOMContentLoaded', function(){
-    const el=document.createElement('div');
-    el.style.cssText='position:fixed;left:10px;top:10px;right:10px;z-index:9999;'+
-      'background:#5c3a1a;color:#ffe9c7;border:1px solid #a73;border-radius:8px;padding:10px 14px;font:13px/1.5 sans-serif';
-    el.textContent='Could not load the three.js library from CDN — check your internet access '+
-      '(cdnjs.cloudflare.com, cdn.jsdelivr.net) and reload the page.';
-    document.body.appendChild(el);
-  });
+  const msg='Could not load the three.js library from CDN — check your internet access (cdnjs.cloudflare.com, cdn.jsdelivr.net) and reload the page.';
+  try{ window.__errSeen={'three.js CDN unavailable':1}; if(typeof window.alert==='function') window.alert(msg); }catch(e){}
   throw new Error('three.js CDN unavailable');
 }
 /* ============================================================================
@@ -665,47 +653,80 @@ function _ikPrep(img){
     const o=y*W+x; R[o]=r*inv; G[o]=g*inv; B[o]=b*inv; }
   return {W, H, f, R, G, B};
 }
-function _ikInk(P){   // «чернильность» пикселя: отличие от ЛОКАЛЬНОГО фона по яркости (в сторону штрихов) + по цветности
-  const {W,H,R,G,B}=P, n=W*H, L=new Float32Array(n);
-  for(let i=0;i<n;i++) L[i]=0.299*R[i]+0.587*G[i]+0.114*B[i];
-  const bw=Math.max(1, Math.round(0.02*Math.min(W,H))), hR=new Uint32Array(256), hG=new Uint32Array(256), hB=new Uint32Array(256); let cnt=0;
-  for(let y=0;y<H;y++) for(let x=0;x<W;x++){ if(x>=bw && x<W-bw && y>=bw && y<H-bw) continue; const i=y*W+x; hR[R[i]|0]++; hG[G[i]|0]++; hB[B[i]|0]++; cnt++; }
-  const med=(h,c)=>{ let s=0; for(let k=0;k<256;k++){ s+=h[k]; if(2*s>=c) return k; } return 255; };
-  const bR=med(hR,cnt), bG=med(hG,cnt), bB=med(hB,cnt), bL=0.299*bR+0.587*bG+0.114*bB;
-  let dk=0, lt=0; for(let i=0;i<n;i++){ const dl=L[i]-bL; if(dl<-40) dk++; else if(dl>40) lt++; }
-  const dark=dk>=lt;   // штрихи темнее фона (бумага) или светлее (тёмный фон)
-  const BS=Math.max(24, Math.round(Math.max(W,H)/10)), nbx=Math.ceil(W/BS), nby=Math.ceil(H/BS), nb=nbx*nby;
-  const kR=new Float32Array(nb), kG=new Float32Array(nb), kB=new Float32Array(nb), kL=new Float32Array(nb), hist=new Uint32Array(256);
-  for(let by=0;by<nby;by++) for(let bx=0;bx<nbx;bx++){ hist.fill(0); let c=0; const x0=bx*BS, y0=by*BS, x1=Math.min(W,x0+BS), y1=Math.min(H,y0+BS);
-    for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){ hist[L[y*W+x]|0]++; c++; }
-    const q=dark? 0.85 : 0.15; let s=0, lev=0; for(let k=0;k<256;k++){ s+=hist[k]; if(s>=q*c){ lev=k; break; } }
-    let sr=0,sg=0,sb=0,m=0; for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){ const i=y*W+x; if(Math.abs(L[i]-lev)<=6){ sr+=R[i]; sg+=G[i]; sb+=B[i]; m++; } }
-    const o=by*nbx+bx; if(m){ kR[o]=sr/m; kG[o]=sg/m; kB[o]=sb/m; } else { kR[o]=bR; kG[o]=bG; kB[o]=bB; } kL[o]=0.299*kR[o]+0.587*kG[o]+0.114*kB[o]; }
-  { // медиана 3×3 по блокам: блок, целиком залитый толстым штрихом, берёт фон соседей
-    const mR=kR.slice(), mG=kG.slice(), mB=kB.slice(), mL=kL.slice();
-    for(let by=0;by<nby;by++) for(let bx=0;bx<nbx;bx++){ const ids=[];
-      for(let yy=Math.max(0,by-1); yy<=Math.min(nby-1,by+1); yy++) for(let xx=Math.max(0,bx-1); xx<=Math.min(nbx-1,bx+1); xx++) ids.push(yy*nbx+xx);
-      ids.sort((a,b)=>kL[a]-kL[b]); const j=ids[ids.length>>1], o=by*nbx+bx; mR[o]=kR[j]; mG[o]=kG[j]; mB[o]=kB[j]; mL[o]=kL[j]; }
-    kR.set(mR); kG.set(mG); kB.set(mB); kL.set(mL); }
-  const S=new Float32Array(n), sg=dark? 1 : -1;
-  for(let y=0;y<H;y++){ let gy=(y+0.5)/BS-0.5; if(gy<0) gy=0; if(gy>nby-1) gy=nby-1; const y0=Math.floor(gy), y1=Math.min(nby-1,y0+1), fy=gy-y0;
-    for(let x=0;x<W;x++){ let gx=(x+0.5)/BS-0.5; if(gx<0) gx=0; if(gx>nbx-1) gx=nbx-1; const x0=Math.floor(gx), x1=Math.min(nbx-1,x0+1), fx=gx-x0;
-      const a=y0*nbx+x0, b=y0*nbx+x1, c=y1*nbx+x0, e=y1*nbx+x1, w00=(1-fx)*(1-fy), w10=fx*(1-fy), w01=(1-fx)*fy, w11=fx*fy;
-      const gR=kR[a]*w00+kR[b]*w10+kR[c]*w01+kR[e]*w11, gG=kG[a]*w00+kG[b]*w10+kG[c]*w01+kG[e]*w11, gB=kB[a]*w00+kB[b]*w10+kB[c]*w01+kB[e]*w11, gL=0.299*gR+0.587*gG+0.114*gB;
-      const i=y*W+x; let s=sg*(gL-L[i]); if(s<0) s=0;
-      const dR=R[i]-gR, dG=G[i]-gG, dB=B[i]-gB, mm=(dR+dG+dB)/3;
-      S[i]=s+0.8*Math.hypot(dR-mm, dG-mm, dB-mm); } }
-  return {S, dark, bg:[bR,bG,bB]};
+function _ikRun(src, dst, base, stride, len, r, isMax, q){   // скользящий max/min окна 2r+1 вдоль строки или столбца (монотонная очередь, O(len)); у краёв окно усечено
+  let head=0, tail=0, j=0;
+  for(let i=0;i<len;i++){ const hi=i+r<len? i+r : len-1;
+    for(; j<=hi; j++){ const v=src[base+j*stride];
+      if(isMax){ while(tail>head && src[base+q[tail-1]*stride]<=v) tail--; } else { while(tail>head && src[base+q[tail-1]*stride]>=v) tail--; }
+      q[tail++]=j; }
+    while(q[head]<i-r) head++;
+    dst[base+i*stride]=src[base+q[head]*stride]; }
 }
-function _ikThreshold(S, W, H){   // Оцу по гистограмме чернильности, не ниже 0.3·p99.5 и 20; гистерезис: слабые пиксели при сильных соседях
-  const n=W*H, NB=512, h=new Float64Array(NB); for(let i=0;i<n;i++){ let v=S[i]|0; if(v>=NB) v=NB-1; h[v]++; }
+function _ikMorph(src, W, H, r, isMax){   // квадратное окно (2r+1)²: строки, затем столбцы
+  const tmp=new Float32Array(W*H), out=new Float32Array(W*H), q=new Int32Array(Math.max(W,H)+1);
+  for(let y=0;y<H;y++) _ikRun(src, tmp, y*W, 1, W, r, isMax, q);
+  for(let x=0;x<W;x++) _ikRun(tmp, out, x, W, H, r, isMax, q);
+  return out;
+}
+function _ikBox(src, W, H, r){   // скользящее среднее (2r+1)², у краёв окно усечено
+  const tmp=new Float32Array(W*H), out=new Float32Array(W*H);
+  for(let y=0;y<H;y++){ const b=y*W; let s=0, c=0, j=0, k=0;
+    for(let i=0;i<W;i++){ const hi=i+r<W? i+r : W-1; for(; j<=hi; j++){ s+=src[b+j]; c++; } for(; k<i-r; k++){ s-=src[b+k]; c--; } tmp[b+i]=s/c; } }
+  for(let x=0;x<W;x++){ let s=0, c=0, j=0, k=0;
+    for(let i=0;i<H;i++){ const hi=i+r<H? i+r : H-1; for(; j<=hi; j++){ s+=tmp[x+j*W]; c++; } for(; k<i-r; k++){ s-=tmp[x+k*W]; c--; } out[x+i*W]=s/c; } }
+  return out;
+}
+function _ikHalf(A, W, H){   // 2×2 усреднение
+  const W2=(W+1)>>1, H2=(H+1)>>1, out=new Float32Array(W2*H2);
+  for(let y=0;y<H2;y++) for(let x=0;x<W2;x++){ let s=0, c=0; for(let dy=0;dy<2;dy++){ const yy=2*y+dy; if(yy>=H) continue; for(let dx=0;dx<2;dx++){ const xx=2*x+dx; if(xx>=W) continue; s+=A[yy*W+xx]; c++; } } out[y*W2+x]=s/c; }
+  return out;
+}
+function _ikUp(A2, W2, H2, W, H){   // билинейно обратно к W×H
+  const out=new Float32Array(W*H);
+  for(let y=0;y<H;y++){ let gy=(y+0.5)/2-0.5; if(gy<0) gy=0; if(gy>H2-1) gy=H2-1; const y0=Math.floor(gy), y1=Math.min(H2-1,y0+1), fy=gy-y0;
+    for(let x=0;x<W;x++){ let gx=(x+0.5)/2-0.5; if(gx<0) gx=0; if(gx>W2-1) gx=W2-1; const x0=Math.floor(gx), x1=Math.min(W2-1,x0+1), fx=gx-x0;
+      out[y*W+x]=(A2[y0*W2+x0]*(1-fx)+A2[y0*W2+x1]*fx)*(1-fy)+(A2[y1*W2+x0]*(1-fx)+A2[y1*W2+x1]*fx)*fy; } }
+  return out;
+}
+function _ikOtsu(S, n){   // порог Оцу по гистограмме (512 корзин), не ниже 0.3·p99.5 и 20
+  const NB=512, h=new Float64Array(NB); for(let i=0;i<n;i++){ let v=S[i]|0; if(v>=NB) v=NB-1; h[v]++; }
   let sum=0; for(let k=0;k<NB;k++) sum+=k*h[k];
   let wB=0, sB=0, best=0, T=0; for(let k=0;k<NB;k++){ wB+=h[k]; if(!wB) continue; const wF=n-wB; if(!wF) break; sB+=k*h[k]; const mB=sB/wB, mF=(sum-sB)/wF, v=wB*wF*(mB-mF)*(mB-mF); if(v>best){ best=v; T=k; } }
   let c=0, p995=0; for(let k=NB-1;k>=0;k--){ c+=h[k]; if(c>=0.005*n){ p995=k; break; } }
-  const thr=Math.max(T+0.5, 0.3*p995, 20), lo=0.55*thr, m=new Uint8Array(n), st=[];
-  for(let i=0;i<n;i++) if(S[i]>=thr){ m[i]=1; st.push(i); }
-  while(st.length){ const i=st.pop(), x=i%W, y=(i-x)/W;
-    for(let dy=-1;dy<=1;dy++){ const yy=y+dy; if(yy<0||yy>=H) continue; for(let dx=-1;dx<=1;dx++){ const xx=x+dx; if(xx<0||xx>=W) continue; const j=yy*W+xx; if(!m[j] && S[j]>=lo){ m[j]=1; st.push(j); } } } }
+  return Math.max(T+0.5, 0.3*p995, 20);
+}
+function _ikInk(P){   // «чернильность» (3.5): отличие от ФОНА, оценённого морфологически — закрытие (тёмные штрихи) или открытие (светлые) окном ~1/20 кадра на половинном
+  // разрешении, со сглаживанием. Фон следует освещению фото (виньетка, тени, градиент), штрихи уже окна из него исчезают. Полярность — по форме масок «цилиндров» (top-hat):
+  // у штрихов маска тонкая (площадь/граница ≈ полширины), у фона между штрихами и у клеток тетради — широкая. Для тёмных штрихов отличие относительное (÷фон)
+  const {W,H,R,G,B}=P, n=W*H, L=new Float32Array(n);
+  for(let i=0;i<n;i++) L[i]=0.299*R[i]+0.587*G[i]+0.114*B[i];
+  const W2=(W+1)>>1, H2=(H+1)>>1, r2=Math.max(3, Math.round(Math.max(W,H)/80));
+  const bgOf=(A, isClose)=>{ const h=_ikHalf(A,W,H), a=_ikMorph(h,W2,H2,r2,isClose), b=_ikMorph(a,W2,H2,r2,!isClose); return _ikUp(_ikBox(b,W2,H2,r2),W2,H2,W,H); };
+  const cL=bgOf(L,true), oL=bgOf(L,false), Lb=_ikBox(L,W,H,1), tb=new Float32Array(n), tw=new Float32Array(n);   // Lb (3×3) — шум пикселей не участвует в выборе полярности
+  for(let i=0;i<n;i++){ const a=cL[i]-Lb[i], b=Lb[i]-oL[i]; tb[i]=a>0? a : 0; tw[i]=b>0? b : 0; }
+  const smin=Math.max(16, Math.round(5e-5*n)), minA=0.001*n;   // крупинки в оценку формы не входят
+  const shape=(A)=>{ const thr=_ikOtsu(A,n), mk=new Uint8Array(n); for(let i=0;i<n;i++) if(A[i]>=thr) mk[i]=1;
+    const lb=_ikLabel(mk, W, H, 1, true); let area=0, edge=0, sum=0;
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const i=y*W+x; if(!mk[i] || lb.sizes[lb.lab[i]]<smin) continue; area++; sum+=A[i]; if(x===0||y===0||x===W-1||y===H-1||!mk[i-1]||!mk[i+1]||!mk[i-W]||!mk[i+W]) edge++; }
+    const width=area/Math.max(1,edge), mean=area? sum/area : 0;
+    return {area, width:+width.toFixed(2), mean:+mean.toFixed(1), score:area>=minA? +(mean/width).toFixed(2) : 0}; };
+  const sb=shape(tb), sw=shape(tw), dark=sb.score>=sw.score;   // штрихи — контрастные И тонкие: среднее «цилиндра» на маске ÷ полширины маски; у клеток тетради и фона между штрихами маска широкая
+  const bL=dark? cL : oL, bR=bgOf(R,dark), bG=bgOf(G,dark), bB=bgOf(B,dark), S=new Float32Array(n);
+  let sR=0, sG=0, sB=0;
+  for(let i=0;i<n;i++){ const b=bL[i]; let s=dark? b-L[i] : L[i]-b; if(s<0) s=0;
+    const dR=R[i]-bR[i], dG=G[i]-bG[i], dB=B[i]-bB[i], mm=(dR+dG+dB)/3;
+    S[i]=(s+0.8*Math.hypot(dR-mm, dG-mm, dB-mm))*(dark? 255/Math.max(b,64) : 1);
+    sR+=bR[i]; sG+=bG[i]; sB+=bB[i]; }
+  return {S, dark, bg:[sR/n, sG/n, sB/n], r:2*r2, sb, sw};
+}
+function _ikThreshold(S, W, H){   // Оцу по гистограмме чернильности, не ниже 0.3·p99.5 и 20; гистерезис: слабые пиксели при сильных соседях
+  const n=W*H, thr=_ikOtsu(S, n), lo=0.55*thr, m=new Uint8Array(n);
+  for(let i=0;i<n;i++) if(S[i]>=thr) m[i]=1;
+  for(let pass=0; pass<2; pass++){ const add=[];   // гистерезис не дальше 2 px от сильных пикселей: слабый край штриха подхватывается, бледная линия (клетка тетради, карандаш) вдоль себя не прорастает
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){ const i=y*W+x; if(m[i] || S[i]<lo) continue; let nb=false;
+      for(let dy=-1;dy<=1 && !nb;dy++){ const yy=y+dy; if(yy<0||yy>=H) continue; for(let dx=-1;dx<=1;dx++){ const xx=x+dx; if(xx>=0 && xx<W && m[yy*W+xx]){ nb=true; break; } } }
+      if(nb) add.push(i); }
+    for(const i of add) m[i]=1; }
   return {m, thr};
 }
 function _ikLabel(m, W, H, val, conn8){   // связные компоненты пикселей со значением val: метки, площади, касание края
@@ -890,7 +911,10 @@ function _ikMatch(F, mask, W, H, diag, hwMed){   // сшивка свободн�
     let fac; if(st===2) fac=3; else if(st===1) fac=nr===0? 0.55 : 2.5; else if(nr===1) fac=longRun? 3 : 0.55; else if(nr===0) fac=(L<=2.5*(a.hw+b.hw)+6)? 0.8 : 2.2; else fac=(nr===2 && !longRun && ai>0.8 && aj>0.8 && turn<0.4)? 1.0 : 1.8+nr;   // два штриха подряд под одним разрывом (близкие пересечения) — если мост прямой
     if(pr.allInk && st===0) fac=Math.max(fac, 1.2);
     return {i, j, L, nr, pts, runs:pr.runs, cost:(L+2*hwMed)*(1+2*(1-ai)+2*(1-aj)+0.6*turn)*fac}; };
-  for(let i=0;i<nF;i++) for(let j=i+1;j<nF;j++){ const c=evalPair(i,j,false); if(c){ cand.push(c); by[i].push(c); by[j].push(c); } }
+  const seen=new Set();   // кандидаты — 12 ближайших концов в пределах Lmax (без перебора всех пар: шумная картинка давала тысячи концов и миллионы мостов)
+  for(let i=0;i<nF;i++){ const d=[]; for(let j=0;j<nF;j++){ if(j===i) continue; const L=Math.hypot(F[j].x-F[i].x, F[j].y-F[i].y); if(L<=Lmax) d.push([L,j]); }
+    d.sort((p,q)=>p[0]-q[0]);
+    for(let t=0; t<d.length && t<12; t++){ const a=Math.min(i,d[t][1]), b=Math.max(i,d[t][1]), key=a*nF+b; if(seen.has(key)) continue; seen.add(key); const c=evalPair(a,b,false); if(c){ cand.push(c); by[a].push(c); by[b].push(c); } } }
   cand.sort((p,q)=>p.cost-q.cost);
   const mate=new Int32Array(nF).fill(-1), pc=new Array(nF).fill(null);
   const take=(c)=>{ mate[c.i]=c.j; mate[c.j]=c.i; pc[c.i]=pc[c.j]=c; }, drop=(c)=>{ mate[c.i]=mate[c.j]=-1; pc[c.i]=pc[c.j]=null; };
@@ -904,7 +928,7 @@ function _ikMatch(F, mask, W, H, diag, hwMed){   // сшивка свободн�
         if(ac.cost+bd.cost < ab.cost+cd.cost-1e-9){ drop(ab); drop(cd); take(ac); take(bd); imp=true; break; } } }
     if(!imp) break; }
   const lone=[]; for(let i=0;i<nF;i++) if(mate[i]<0) lone.push(i);   // остатки — с ослабленными условиями
-  if(lone.length>=2){ const rc=[]; for(let x=0;x<lone.length;x++) for(let y=x+1;y<lone.length;y++){ const c=evalPair(lone[x],lone[y],true); if(c) rc.push(c); }
+  if(lone.length>=2 && lone.length<=40){ const rc=[]; for(let x=0;x<lone.length;x++) for(let y=x+1;y<lone.length;y++){ const c=evalPair(lone[x],lone[y],true); if(c) rc.push(c); }
     rc.sort((p,q)=>p.cost-q.cost); for(const c of rc) if(mate[c.i]<0 && mate[c.j]<0){ c.relaxed=true; take(c); } }
   const out=[]; for(let i=0;i<nF;i++) if(pc[i] && pc[i].i===i) out.push(pc[i]);
   return {pairs:out, lone:[...Array(nF).keys()].filter(i=>mate[i]<0)};
@@ -959,7 +983,17 @@ function ikRecognize(img){   // → {ok, msg, pts (рабочие px), recs (п�
   let DT=_ikDT(m, W, H); { const h=new Uint32Array(256); for(let i=0;i<n;i++) if(m[i]) h[Math.min(255, Math.round(DT[i]))]++; let s=0, md=1; for(let k=0;k<256;k++){ s+=h[k]; if(2*s>=inkN){ md=k; break; } }
     const hw0=Math.max(1, 2*md), bl=_ikLabel(m, W, H, 0, false), hmax=Math.max(4, 2.5*hw0*hw0); let filled=0;
     for(let i=0;i<n;i++) if(!m[i]){ const id=bl.lab[i]; if(!bl.touch[id] && bl.sizes[id]<hmax){ m[i]=1; filled++; } }
-    if(filled) DT=_ikDT(m, W, H); }
+    // далёкие соринки, тени и край листа на фото: части диаграммы разделены только разрывами, поэтому держимся скопления штрихов с наибольшим количеством чернил
+    const rd=Math.max(6, Math.round(8*hw0), Math.round(Math.max(W,H)/32)), cl=_ikLabel(m, W, H, 1, true), kc=cl.sizes.length;   // скопления: рамки компонент, раздутые на rd, пересекаются
+    const bx0=new Int32Array(kc).fill(1e9), by0=new Int32Array(kc).fill(1e9), bx1=new Int32Array(kc).fill(-1), by1=new Int32Array(kc).fill(-1), par=new Int32Array(kc);
+    for(let i=0;i<n;i++){ const c=cl.lab[i]; if(c<0) continue; const x=i%W, y=(i-x)/W; if(x<bx0[c]) bx0[c]=x; if(x>bx1[c]) bx1[c]=x; if(y<by0[c]) by0[c]=y; if(y>by1[c]) by1[c]=y; }
+    for(let c=0;c<kc;c++) par[c]=c; const fd=(a)=>{ while(par[a]!==a){ par[a]=par[par[a]]; a=par[a]; } return a; };
+    for(let a=0;a<kc;a++) for(let b=a+1;b<kc;b++){ if(bx0[a]>bx1[b]+rd || bx0[b]>bx1[a]+rd || by0[a]>by1[b]+rd || by0[b]>by1[a]+rd) continue; const ra=fd(a), rb=fd(b); if(ra!==rb) par[rb]=ra; }
+    const inkBy=new Float64Array(kc); for(let c=0;c<kc;c++) inkBy[fd(c)]+=cl.sizes[c];
+    let bestC=0; for(let c=1;c<kc;c++) if(inkBy[c]>inkBy[bestC]) bestC=c;
+    let removed=0; for(let i=0;i<n;i++){ const c=cl.lab[i]; if(c<0 || !m[i]) continue; const rc=fd(c); if(rc!==bestC && inkBy[rc]<0.25*inkBy[bestC]){ m[i]=0; removed++; } }
+    inkN-=removed;
+    if(filled || removed) DT=_ikDT(m, W, H); }
   const Wp=W+2, skp=new Uint8Array(Wp*(H+2)); for(let y=0;y<H;y++) for(let x=0;x<W;x++) skp[(y+1)*Wp+x+1]=m[y*W+x];
   _ikThin(skp, W, H);
   const G=_ikPrune(_ikGraph(skp, W, H, DT));
@@ -984,7 +1018,8 @@ function ikRecognize(img){   // → {ok, msg, pts (рабочие px), recs (п�
     if(hi>0 && lo<0.6*hi){ r.known=true; r.kind='Xs'; if(mo<mu){ const tx=r.ox, ty=r.oy; r.ox=r.ux; r.oy=r.uy; r.ux=tx; r.uy=ty; } } }
   for(const r of recs) r.edge=-1;
   { const byKey=new Map(); for(const en of ends) byKey.set(en.key, en); for(const r of recs){ } for(const fr of J.free) if(fr.stub>=0) recs[fr.stub].edge=fr.key>>1;
-    for(const [key, lk] of link) if(lk.kind==='pass'){ for(const r of recs) if(r.edge<0 && r.kind==='X' && Math.abs(r.x-G.C[lk.c].x)<1e-6 && Math.abs(r.y-G.C[lk.c].y)<1e-6) r.edge=key>>1; } }
+    for(const [key, lk] of link) if(lk.kind==='pass'){ for(const r of recs) if(r.edge<0 && (r.kind==='X' || r.kind==='Xs' || r.kind==='Xt') && Math.abs(r.x-G.C[lk.c].x)<1e-6 && Math.abs(r.y-G.C[lk.c].y)<1e-6) r.edge=key>>1; } }   // 3.5: и Xs/Xt — иначе запись без ребра отбрасывалась фильтром главной кривой, и пересечение уходило в чередование
+  if(J.free.length>3000 || G.E.length>20000) return {ok:false, msg:'the picture is too noisy (too many separate stroke pieces)'};
   const M=_ikMatch(J.free, m, W, H, diag, hwMed); let relaxed=0;
   for(const c of M.pairs){ const a=J.free[c.i], b=J.free[c.j]; if(c.relaxed) relaxed++;
     link.set(a.key, {to:b.key, kind:'bridge', pts:c.pts, L:c.L}); link.set(b.key, {to:a.key, kind:'bridge', pts:c.pts.slice().reverse(), L:c.L});
@@ -1004,14 +1039,17 @@ function ikRecognize(img){   // → {ok, msg, pts (рабочие px), recs (п�
   return {ok:true, dbg, pts, recs:rs, hw:hwMed, W, H, f:P.f, mask:m, dark:ink.dark, ms:Date.now()-t0,
     notes:{comps:big, open:!main.closed, lone:M.lone.length, relaxed, known:rs.filter(r=>r.known).length, unknown:rs.filter(r=>!r.known).length}};
 }
+function ikFail(why, hint){   // 3.5: не удалось — стандартное окно сообщений (showError; подсказка о виде картинки — только в окне) + короткая строка статуса
+  showError('Could not load a knot from the picture: '+why+'.', hint? 'The picture should show one closed line with a gap in the lower strand at every crossing.' : '');
+}
 function ikApply(res){   // распознанное → редактор: кривая, над/под (из разрывов; без разрыва — чередование), подложка, статус
-  if(!res || !res.ok){ setStatus('image: '+((res && res.msg)||'not recognised')); return {ok:false, msg:res && res.msg}; }
+  if(!res || !res.ok){ ikFail((res && res.msg)||'not recognised', true); return {ok:false, msg:res && res.msg}; }
   document.getElementById('clear').onclick();
   let minx=1e9, maxx=-1e9, miny=1e9, maxy=-1e9; for(const p of res.pts){ if(p.x<minx)minx=p.x; if(p.x>maxx)maxx=p.x; if(p.y<miny)miny=p.y; if(p.y>maxy)maxy=p.y; }
   const cw=(drawCv.clientWidth>4)?drawCv.clientWidth:((drawCv.width>4)?drawCv.width:800), ch=(drawCv.clientHeight>4)?drawCv.clientHeight:((drawCv.height>4)?drawCv.height:600);
   const k=Math.min(cw*0.86/Math.max(1,maxx-minx), ch*0.86/Math.max(1,maxy-miny)), ox=cw/2-k*(minx+maxx)/2, oy=ch/2-k*(miny+maxy)/2;
   raw=res.pts.map(p=>({x:p.x*k+ox, y:p.y*k+oy})); closedCurve=false; drawing=false; finishCurve(true);
-  if(!closedCurve){ setStatus('image: the recognised curve is too short'); return {ok:false, msg:'short'}; }
+  if(!closedCurve){ ikFail('the recognised curve is too short', true); return {ok:false, msg:'short'}; }
   const R=res.recs.map(r=>({x:r.x*k+ox, y:r.y*k+oy, known:r.known, ox:r.ox, oy:r.oy, ux:r.ux, uy:r.uy}));
   const tol=Math.max(10, (2.5*res.hw+6)*k), groups=new Map(), none=[], rest=[]; let known=0, bigon=0;
   for(const c of crossings){ let bi=-1, bd=tol; R.forEach((r,ri)=>{ const d=Math.hypot(r.x-c.x, r.y-c.y); if(d<bd){ bd=d; bi=ri; } }); if(bi<0) none.push(c); else { if(!groups.has(bi)) groups.set(bi,[]); groups.get(bi).push(c); } }
@@ -1045,7 +1083,7 @@ function ikApply(res){   // распознанное → редактор: кр�
 }
 async function ikLoadFile(file){   // файл (кнопка Image, перетаскивание, вставка) → ImageData ≤1600 px → распознавание → редактор
   if(!file) return;
-  if(!/^image\//.test(file.type||'') && !/\.(png|jpe?g|gif|webp|bmp|svg|avif|heic|heif)$/i.test(file.name||'')){ setStatus('image: not an image file'); return; }
+  if(!/^image\//.test(file.type||'') && !/\.(png|jpe?g|gif|webp|bmp|svg|avif|heic|heif)$/i.test(file.name||'')){ ikFail('the file is not an image'); return; }
   setStatus('image: recognising…');
   const url=URL.createObjectURL(file);
   try{
@@ -1057,7 +1095,7 @@ async function ikLoadFile(file){   // файл (кнопка Image, перета
     await new Promise(r=>setTimeout(r, 20));   // статус «recognising…» успевает отрисоваться
     const res=ikRecognize(data); window.__ikLast=res && {ok:res.ok, msg:res.msg, ms:res.ms, notes:res.notes, W:res.W, H:res.H, hw:res.hw};
     ikApply(res);
-  }catch(e){ setStatus('image: '+((e && e.message)||e)); }
+  }catch(e){ ikFail((e && e.message)||String(e)); }
   finally{ URL.revokeObjectURL(url); }
 }
 if(typeof window!=='undefined' && !window.__isWorker){   // кнопка Image, перетаскивание файла на левую панель, вставка картинки из буфера (⌘V)
@@ -1251,7 +1289,7 @@ function randomKnot(target){
     if(!best || score<best.score) best={g, j, score, err:Math.abs(g.nc-target)};
     if(it>=600 && best.err===0) break;
   }
-  if(!best){ setStatus('could not build a diagram'); return; }
+  if(!best){ showError('could not build a diagram'); return; }
   const g=best.g, P=_gdPolygon(g);
   // сетка растягивается под пропорции панели (до 1.5×) и вписывается по обеим осям
   const asp=Math.min(1.5, Math.max(W,Hh)/Math.max(1,Math.min(W,Hh))), ax=(W>=Hh)?asp:1, ay=(W>=Hh)?1:asp;
@@ -1264,7 +1302,7 @@ function randomKnot(target){
     gW*=0.5; theta*=0.5;
   }
   finishCurve(true);
-  if(!closedCurve){ setStatus('could not build a diagram (window not rendered?)'); return; }
+  if(!closedCurve){ showError('could not build a diagram (window not rendered?)'); return; }
   for(const c of crossings) c.over = rnd()<0.5?'A':'B';
   updateKnotType(); autoThick(); renderDraw(); syncKnot3D();
   setStatus('random diagram: '+crossings.length+' crossings (grid '+g.n+'×'+g.n+'), over/under random · '+(isUnknot?'unknot':'det '+knotDet)
@@ -2757,7 +2795,7 @@ function stirField(){   // K случайных частей, у каждой с
 function stirStart(){
   if(running || _stir || !verts.length) return false;
   { const g=energyGrad(false);                       // ядро шире зазоров (ползунки сдвинуты после финала) — сдуть, стадия A раскроет заново
-    if(!isFinite(g.E)){ const gr=minSegGapRep(); _inflate=Math.max(1e-4, Math.min(1, gr/(1.3*sNominal()))); if(!isFinite(energyGrad(false).E)){ setStatus('cannot stir: strands are inside the hard core'); return false; } } }
+    if(!isFinite(g.E)){ const gr=minSegGapRep(); _inflate=Math.max(1e-4, Math.min(1, gr/(1.3*sNominal()))); if(!isFinite(energyGrad(false).E)){ showError('cannot stir: strands are inside the hard core'); return false; } } }
   const kept=msWinsKeepBest(); _msSel=null; msSetShown(null);   // 2.40: Stir идёт от узла в главном виде (выбранного кликом или лучшего); выбор снят, окно — только лучшее
   _msCarry = kept ? {E:kept.E, verts:kept.verts.map(v=>v.clone()), note:kept.note||'', key:(kept.key!==undefined? kept.key : constsKey()), thick:thickOf(kept)} : null;   // лучшая попытка идёт в новую серию как №1
   _msEnergies = kept ? [kept.E] : []; _msBest=null; _msRound=0; _msK=1; _msPaused=false;
@@ -2864,7 +2902,7 @@ function stirFinish(){
   if(st.mode==='pull' && st.disp<0.5*L0){    // только растаскивание: узел слишком плотный, части не сдвинулись — серию не запускаем
     _dbgStir.tooTight=true; stirEnable(true);
     const pill=document.getElementById('statusPill'); if(pill && pill.classList){ pill.classList.remove('run'); pill.classList.add('done'); }
-    setStatus(warn+'stir: knot too tight to pull apart ('+st.rejected+'/'+st.i+' steps rejected) — reduce Thick./Repel.');
+    showError(warn+'stir: knot too tight to pull apart ('+st.rejected+'/'+st.i+' steps rejected) — reduce Thick./Repel.');
     return;
   }
   _fromLift=true; _liftFromDiagram=false;        // разрыхлённая форма — лифт новой серии попыток (без перестройки из диаграммы)
@@ -4015,7 +4053,7 @@ async function persistTelemetry(viaGesture){
   return null;
 }
 function exportTelemetry(){
-  if(!_telemData()){ setStatus('build a knot first'); return; }
+  if(!_telemData()){ showError('build a knot first'); return; }
   persistTelemetry(true).then(saved=>{
     if(saved) setStatus('telemetry: '+saved+' → send the file');
   });
@@ -4236,7 +4274,7 @@ function parFallback(why){
   try{ _setVertsFrom(_msLift); if(carry) _msCarry=carry; _fromLift=true; _liftFromDiagram=(kind==='diagram');
     if(P.s0 && P.pins && STIR_MODE==='loops' && STIR_PIN){ _stirPins=P.pins; _pinsFresh=true; }   // пины ремапа вернуть попытке 1 (лифт — тот же ремап; позиции снимаются лениво на первом relaxStep) — иначе она шла бы без фазы 1
     _parSkipOnce=true; startPhysics(); _fbNote=note; setStatus(runStatus()); }   // однократно последовательно (иначе при «soft» снова параллельно); пометка — после старта: он её сбрасывает
-  catch(e){ console.error('sequential fallback failed:', e); running=false; stopPhysics(''); setStatus('⚠ could not start physics: '+(e && e.message || e)); }
+  catch(e){ console.error('sequential fallback failed:', e); running=false; stopPhysics(''); showError('⚠ could not start physics: '+(e && e.message || e)); }
 }
 function parMessage(k, m){
   if(!_par || !_par.active.has(k)) return; const a=_par.active.get(k); a.alive=true; _par.anyAlive=true;
@@ -4481,6 +4519,11 @@ function stopPhysics(msg){
   if(msg) setStatus(msg);   // ракурс не трогаем: рывок камеры раздражал
 }
 function setStatus(t){ document.getElementById('status').textContent=t; }
+function showError(msg, detail){   // 3.5: ошибка действия — в стандартном окне сообщений (как у системной программы) и в строке статуса; detail — только в окне; в воркере и на стенде — только статус
+  setStatus(msg);
+  if(typeof window==='undefined' || window.__isWorker || typeof window.alert!=='function') return;
+  try{ window.alert(String(msg).replace(/^⚠\s*/,'')+(detail? '\n\n'+detail : '')); }catch(e){}
+}
 function pillIdle(){ const p=document.getElementById('statusPill'); if(p && p.classList) p.classList.remove('done','run'); }
 
 /* ============================================================================
@@ -4600,7 +4643,7 @@ thick.oninput=()=>{ thickCoef=+thick.value; document.getElementById('thickVal').
 
 // --- экспорт 3D-трубки в OBJ (вершины + нормали + треугольники) ---
 function exportOBJ(){
-  if(!tubeMesh){ setStatus('draw a knot on the left first'); return; }
+  if(!tubeMesh){ showError('draw a knot on the left first'); return; }
   const g=tubeMesh.geometry, pos=g.attributes.position, nor=g.attributes.normal, idx=g.index;
   const L=[]; L.push('# Topological knot — tube export', 'o knot');
   for(let i=0;i<pos.count;i++) L.push('v '+pos.getX(i).toFixed(5)+' '+pos.getY(i).toFixed(5)+' '+pos.getZ(i).toFixed(5));
@@ -4667,7 +4710,7 @@ document.getElementById('restoreLast').onclick=async ()=>{
     }
     updateCrossInfo(); renderDraw(); syncKnot3D();
     setStatus('last drawing restored from telemetry — press ▶ Physics');
-  }catch(e){ setStatus('restore failed: '+((e&&e.message)||e||'log not found')); }
+  }catch(e){ showError('restore failed: '+((e&&e.message)||e||'log not found')); }
 };
 window.__knotDetProj=()=>[_detProj(0),_detProj(1),_detProj(2)];
 window.__knotLog=()=>runLog;   // полный лог прогона для анализа
@@ -4773,7 +4816,7 @@ window.__knotSetVerts=(arr)=>{ if(!arr||arr.length<8) return false; _liftFromDia
   N=verts.length; allocBuffers(); resampleEqualArc(); recenter();
   rebuildTube(); fitCamera(false); return {N,L0:+L0.toFixed(5)}; };
 // ВЕРСИЯ ИНТЕРФЕЙСА: X задаёт пользователь, Y растёт на 1 с каждой новой сборкой
-const APP_VER_MAJOR=3, APP_VER_MINOR=4;   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
+const APP_VER_MAJOR=3, APP_VER_MINOR=5;   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
 const APP_VERSION=APP_VER_MAJOR+'.'+APP_VER_MINOR;   // 3.0, 3.1, … (с 3.0 без дополнения нулём)
 window.__buildTag='v'+APP_VERSION;
 { const el=document.getElementById('appVer'); if(el) el.textContent=APP_VERSION; }

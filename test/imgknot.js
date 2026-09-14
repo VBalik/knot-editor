@@ -7,7 +7,8 @@
   function seeded(seed, fn){ const orig=Math.random; let sd=seed; Math.random=()=>{ sd=(Math.imul(sd,1103515245)+12345)&0x7fffffff; return sd/0x7fffffff; }; try{ fn(); } finally{ Math.random=orig; } }
   const STY={ clean:{w:5, gapK:2.2}, thin:{w:2, gapK:4.5}, thick:{w:13, gapK:1.6}, touch1:{w:6, gapK:1.0, gapK2:2.6}, touch2:{w:6, gapK:0.8, alt:true},
     sketch:{w:4, wVar:0.3, gapK:2.8, wob:5, noise:10, light:0.35, blur:1, breaks:2, ink:[40,45,70], bg:[236,232,220]},
-    nogap:{w:5, gapK:0, alt:true}, dark:{w:5, gapK:2.2, bg:[14,18,26], ink:[140,215,255]}, photo:{w:5, gapK:2.4, noise:14, light:0.7, blur:1, bg:[200,196,188], ink:[30,30,40]} };
+    nogap:{w:5, gapK:0, alt:true}, dark:{w:5, gapK:2.2, bg:[14,18,26], ink:[140,215,255]}, photo:{w:5, gapK:2.4, noise:14, light:0.7, blur:1, bg:[200,196,188], ink:[30,30,40]},
+    graph:{w:4.5, wVar:0.25, gapK:2.6, wob:4, noise:8, light:0.35, vignette:0.5, shadow:0.45, blur:1, breaks:1, ink:[35,65,175], bg:[236,231,219], grid:{step:19, w:1.5, color:[160,130,135], a:0.45, angle:0.04}, pencil:{w:1.3, color:[110,110,115], a:0.4, dx:1.5, dy:-1}} };   // 3.5: фото тетради в клетку (как у пользователя): клетка, карандашный эскиз через разрывы, виньетка, тень у края
   const styles=(process.env.IK_STYLES||Object.keys(STY).join(',')).split(','), Ns=(process.env.IK_N||'3,5,8,12,18,26').split(',').map(Number), nSeeds=+(process.env.IK_SEEDS||2);
   const cases=[]; for(const key of ['trefoil','figure8','cinquefoil','septafoil']) cases.push({key});
   for(const nc of Ns) for(let s=0;s<nSeeds;s++) cases.push({nc, seed:5000+nc*37+s*101});
@@ -23,7 +24,7 @@
       const cumW=RS.arcTable(ipts), toW=(s)=>{ let lo=0, hi=cumLen.length-1; while(lo<hi){ const mid=(lo+hi+1)>>1; if(cumLen[mid]<=s) lo=mid; else hi=mid-1; } const a=cumLen[lo], b=(lo+1<cumLen.length)? cumLen[lo+1] : totalLen2D, f=b-a>1e-9? (s-a)/(b-a) : 0; return cumW[lo]+f*(cumW[lo+1]-cumW[lo]); };   // позиция разрыва — по дуге САМОЙ (дрожащей) кривой картинки
       const gaps=[]; if(S.gapK>0) for(const c of crossings){ const su=toW(c.over==='A'? c.sB : c.sA), g=S.gapK*S.w, g2=(S.gapK2||S.gapK)*S.w; gaps.push({s0:su-g, s1:su+g2}); }   // gapK2: несимметричный разрыв (касание с одной стороны)
       const gt=crossings.map(c=>{ let x=c.x*kI+oxI, y=c.y*kI+oyI; if(field){ const d=field(x,y); x+=d.dx; y+=d.dy; } const o=c.over==='A'? c.dirA : c.dirB; return {x, y, ox:o.x, oy:o.y}; });
-      const img=RS.raster({W:IW, H:IH, pts:ipts, gaps, w:S.w, wVar:S.wVar, bg:S.bg, ink:S.ink, noise:S.noise, light:S.light, blur:S.blur, breaks:S.breaks, seed:(cs.seed||17)+styles.indexOf(st)});
+      const img=RS.raster({W:IW, H:IH, pts:ipts, gaps, w:S.w, wVar:S.wVar, bg:S.bg, ink:S.ink, noise:S.noise, light:S.light, blur:S.blur, breaks:S.breaks, grid:S.grid, pencil:S.pencil, vignette:S.vignette, shadow:S.shadow, seed:(cs.seed||17)+styles.indexOf(st)});
       let res=null, ap=null; const t0=Date.now();
       try{ res=ikRecognize(img); ap=ikApply(res); }catch(e){ agg.err++; fails.push({st, cs, err:String(e && e.stack || e).slice(0,300)}); continue; }
       agg.ms+=Date.now()-t0; agg.n++;
@@ -41,6 +42,6 @@
     }
     out[st]={n:agg.n, exact:agg.exact, countOK:agg.countOK, detOK:agg.detOK, overPct:+(100*agg.overOK/Math.max(1,agg.overAll)).toFixed(1), msAvg:Math.round(agg.ms/Math.max(1,agg.n)), err:agg.err};
     console.error(st, JSON.stringify(out[st])); }
-  try{ fs.mkdirSync(path.join(process.cwd(),'out'),{recursive:true}); fs.writeFileSync(path.join(process.cwd(),'out','imgknot_fails.json'), JSON.stringify(fails,null,1)); }catch(e){}
+  try{ fs.mkdirSync(path.join(process.cwd(),'out'),{recursive:true}); fs.writeFileSync(process.env.IK_FAILS||path.join(process.cwd(),'out','imgknot_fails.json'), JSON.stringify(fails,null,1)); }catch(e){}
   return {summary:out, fails:fails.slice(0,12)};
 })()
