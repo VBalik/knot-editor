@@ -4,12 +4,12 @@
   const ann=process.env.ANN? JSON.parse(process.env.ANN) : null; if(ann) window.__ann=ann;
   const REP=+(process.env.REP||2), TRIES=+(process.env.TRIES||5), BUDGET=+(process.env.BUDGET||80000);
   const want=(process.env.KNOTS||'figure8,det11,det11b,r12,r16,r20').split(',');
-  const TF='../telemetry/knot-telemetry-20260904-165935-456.json';
+  const TF='fixtures/telemetry/knot-telemetry-20260904-165935-456.json';
   const T=fs.existsSync(TF)? JSON.parse(fs.readFileSync(TF,'utf8')) : null;
   function seeded(seed, fn){ const orig=Math.random; let sd=seed; Math.random=()=>{ sd=(Math.imul(sd,1103515245)+12345)&0x7fffffff; return sd/0x7fffffff; }; try{ fn(); } finally{ Math.random=orig; } }
   const restore=async()=>{ global.fetch=async()=>({ok:true,json:async()=>T}); document.getElementById('restoreLast').onclick(); await new Promise(r=>setTimeout(r,400)); };
   const rnd=(n,seed)=>async()=>seeded(seed,()=>{ let t=0; do{ randomKnot(n); }while(isUnknot && t++<30); });
-  const TF2='../telemetry/knot-telemetry-20260907-120335-802.json'; const T2=fs.existsSync(TF2)? JSON.parse(fs.readFileSync(TF2,'utf8')) : null;
+  const TF2='fixtures/telemetry/knot-telemetry-20260907-120335-802.json'; const T2=fs.existsSync(TF2)? JSON.parse(fs.readFileSync(TF2,'utf8')) : null;
   const restore2=async()=>{ global.fetch=async()=>({ok:true,json:async()=>T2}); document.getElementById('restoreLast').onclick(); await new Promise(r=>setTimeout(r,400)); };
   const KNOTS={ figure8:{prep:async()=>H.clickPreset('figure8'), sl:[5,2,9]}, user20:{prep:restore2, sl:[5,2,9]},
     det11:{prep:restore, sl:[10,10,2]}, det11b:{prep:restore, sl:[5,2,9]},

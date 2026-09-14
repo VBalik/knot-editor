@@ -1,6 +1,6 @@
 // разнообразие попыток со случайным профилем жёсткости: диаграмма пользователя (det 11) и восьмёрка
 (async ()=>{ const H=global.__H; window.__noAutoSave=true; const fs=global.__require('fs'); const out={};
-  const T=JSON.parse(fs.readFileSync('../telemetry/knot-telemetry-20260904-165935-456.json','utf8'));
+  const T=JSON.parse(fs.readFileSync('fixtures/telemetry/knot-telemetry-20260904-165935-456.json','utf8'));
   async function series(name, prep, thick, rep, bend, ms, budget){
     H.el('clear').onclick(); if(H.running()) H.play();
     H.setSlider('thick',thick); H.setSlider('repCoef',rep); H.setSlider('bendCoef',bend);

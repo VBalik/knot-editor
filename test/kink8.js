@@ -3,7 +3,7 @@
 (async ()=>{
   const H=global.__H; window.__noAutoSave=true;
   const fs=global.__require('fs');
-  const raw=fs.readFileSync('/Users/balik/My Drive/Programming/Claude/Knots/telemetry/knot-telemetry-20260728-140036-575.json','utf8');
+  const raw=fs.readFileSync('fixtures/telemetry/knot-telemetry-20260728-140036-575.json','utf8');
   global.fetch=async ()=>({ ok:true, json:async ()=>JSON.parse(raw) });
   document.getElementById('restoreLast').onclick();
   await new Promise(r=>setTimeout(r,300));

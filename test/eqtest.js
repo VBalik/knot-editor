@@ -2,7 +2,7 @@
 (async ()=>{
   const H=global.__H; window.__noAutoSave=true;
   const fs=global.__require('fs');
-  const raw=fs.readFileSync('/Users/balik/My Drive/Programming/Claude/Knots/telemetry/knot-telemetry-20260731-153505-210.json','utf8');
+  const raw=fs.readFileSync('fixtures/telemetry/knot-telemetry-20260731-153505-210.json','utf8');
   global.fetch=async ()=>({ ok:true, json:async ()=>JSON.parse(raw) });
   const EQ=+(process.env.EQ||0);
   H.set({eq:EQ});

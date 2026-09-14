@@ -1,7 +1,7 @@
 // состояние/диаграмма пользователя при разной дальности отталкивания: раскрываются ли витки
 (async ()=>{ const H=global.__H; window.__noAutoSave=true; const fs=global.__require('fs'); const out={};
   const fin=JSON.parse(fs.readFileSync('fixtures/user_20cross_final.json','utf8'));
-  const T=JSON.parse(fs.readFileSync('../telemetry/knot-telemetry-20260904-165935-456.json','utf8'));
+  const T=JSON.parse(fs.readFileSync('fixtures/telemetry/knot-telemetry-20260904-165935-456.json','utf8'));
   function fromState(thick, rep, bend, budget){
     H.el('clear').onclick(); H.drawCurve(u=>{ const t=u*2*Math.PI; return {x:400+200*Math.cos(t), y:300+200*Math.sin(t)}; }, 240);
     H.setSlider('thick',thick); H.setSlider('repCoef',rep); H.setSlider('bendCoef',bend);

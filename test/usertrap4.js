@@ -1,6 +1,6 @@
 // диаграмма пользователя (telemetry 16:59, det 11): многостарт с контролем растяжения; разные дальности отталкивания
 (async ()=>{ const H=global.__H; window.__noAutoSave=true; const fs=global.__require('fs'); const out={};
-  const T=JSON.parse(fs.readFileSync('../telemetry/knot-telemetry-20260904-165935-456.json','utf8'));
+  const T=JSON.parse(fs.readFileSync('fixtures/telemetry/knot-telemetry-20260904-165935-456.json','utf8'));
   function ext(v){ let mn=[1e9,1e9,1e9], mx=[-1e9,-1e9,-1e9]; for(const p of v) for(let c=0;c<3;c++){ mn[c]=Math.min(mn[c],p[c]); mx[c]=Math.max(mx[c],p[c]); } return mx.map((x,c)=>+(x-mn[c]).toFixed(2)); }
   async function fromDiagram(name, thick, rep, bend, ms, budget){
     H.el('clear').onclick(); if(H.running()) H.play();
