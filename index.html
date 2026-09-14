@@ -37,8 +37,11 @@ html,body{margin:0;height:100%;color:var(--txt);
 /* ---- panes: two floating "lab windows" on the space ground ---- */
 #app{display:flex;height:100%}
 .pane{display:flex;flex-direction:column;min-width:0;padding:8px;gap:8px}
-#left{flex:0 0 46%;border-right:1px solid var(--line)}
-#right{flex:1 1 54%;position:relative}
+#left{flex:0 0 var(--leftW,46%);min-width:240px}
+#right{flex:1 1 auto;min-width:340px;position:relative}
+#splitter{flex:0 0 7px;cursor:col-resize;position:relative;margin:8px 0;border-radius:4px;transition:background .15s;touch-action:none;user-select:none;-webkit-user-select:none}   /* граница панелей: тянуть мышью, двойной клик — 46 % */
+#splitter::before{content:"";position:absolute;left:3px;top:0;bottom:0;width:1px;background:var(--line)}
+#splitter:hover,#splitter.drag{background:rgba(62,224,210,.16)}
 
 .paneTitle{font-size:10.5px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;
   color:#a3b3cb;flex:none;padding:0 4px 0 2px;user-select:none;-webkit-user-select:none;
@@ -54,8 +57,8 @@ html,body{margin:0;height:100%;color:var(--txt);
   user-select:text;-webkit-user-select:text}
 
 /* ---- floating toolbar: one 52px row, rounded ends, glass + hairline glow ---- */
-.topbar{display:flex;align-items:center;gap:7px;flex-wrap:nowrap;overflow:hidden;flex:none;
-  position:relative;height:52px;padding:0 12px;
+.topbar{display:flex;align-items:center;gap:7px;row-gap:4px;flex-wrap:wrap;overflow:visible;flex:none;
+  position:relative;min-height:52px;padding:6px 12px;   /* не помещается в строку — переносится, а не обрезается */
   background:linear-gradient(180deg,rgba(24,32,48,.9),rgba(12,17,27,.92));
   border:1px solid var(--edge);border-radius:999px;
   backdrop-filter:blur(12px) saturate(1.2);-webkit-backdrop-filter:blur(12px) saturate(1.2);
@@ -63,10 +66,17 @@ html,body{margin:0;height:100%;color:var(--txt);
 .topbar::before{content:"";position:absolute;left:28px;right:28px;top:0;height:1px;pointer-events:none;
   background:linear-gradient(90deg,transparent,rgba(62,224,210,.5) 30%,rgba(139,124,255,.5) 70%,transparent)}
 .tspacer{flex:1 1 6px}
+/* 3D-панель: органы управления компактнее */
+#right .topbar{gap:5px;padding:6px 9px}
+#right .chip{padding:0 7px;gap:5px;font-size:11px}
+#right .chip input[type=range]{width:44px}
+#right .chip input[type=number]{width:42px}
+#stressChip>span{width:30px!important}
+#right button{padding:0 9px}
 
 /* ---- chips ---- */
 .chip{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 10px;flex:none;
-  background:rgba(255,255,255,.035);border:1px solid var(--edge);border-radius:999px;
+  background:rgba(255,255,255,.035);border:1px solid var(--edge);border-radius:8px;
   font-size:11.5px;font-weight:500;color:var(--muted);white-space:nowrap;letter-spacing:.1px;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
   transition:border-color .18s,background .18s,box-shadow .18s}
@@ -79,16 +89,18 @@ html,body{margin:0;height:100%;color:var(--txt);
 .chip label{display:inline-flex;align-items:center;gap:6px}
 .chip input[type=range]{width:54px;margin:0}
 .chip input[type=number]{width:52px;height:24px;background:rgba(3,6,12,.55);color:var(--txt);
-  border:1px solid var(--edge);border-radius:8px;padding:0 6px;font:inherit;font-size:12px;font-weight:600;
+  border:1px solid var(--edge);border-radius:4px;padding:0 6px;font:inherit;font-size:12px;font-weight:600;
   font-variant-numeric:tabular-nums;text-align:center;-moz-appearance:textfield;appearance:textfield;outline:none;
   transition:border-color .15s,box-shadow .15s}
 .chip input[type=number]:focus{border-color:rgba(62,224,210,.6);box-shadow:0 0 0 2px rgba(62,224,210,.14), 0 0 10px -2px var(--glow-teal)}
 .chip input[type=number]::-webkit-outer-spin-button,.chip input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .chip button.ghost{height:24px;padding:0 8px;font-size:12px}
+.chip select{height:24px;background:rgba(3,6,12,.55);color:var(--txt);border:1px solid var(--edge);border-radius:4px;padding:0 4px;font:inherit;font-size:12px;font-weight:600;outline:none;cursor:pointer}   /* режим Stir — в стиле числовых полей */
+.chip select:focus{border-color:rgba(62,224,210,.6);box-shadow:0 0 0 2px rgba(62,224,210,.14)}
 
 /* checkbox (Tight) — small neon tile */
 input[type=checkbox]{-webkit-appearance:none;appearance:none;width:15px;height:15px;margin:0;flex:none;
-  border-radius:5px;border:1px solid var(--edge-hi);background:rgba(3,6,12,.55);position:relative;cursor:pointer;
+  border-radius:3px;border:1px solid var(--edge-hi);background:rgba(3,6,12,.55);position:relative;cursor:pointer;
   vertical-align:-3px;transition:background .15s,border-color .15s,box-shadow .15s}
 input[type=checkbox]:hover{border-color:rgba(62,224,210,.5)}
 input[type=checkbox]:checked{background:linear-gradient(135deg,var(--teal),var(--violet));border-color:transparent;
@@ -98,7 +110,7 @@ input[type=checkbox]:checked::after{content:"";position:absolute;left:4.5px;top:
 input[type=checkbox]:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(62,224,210,.22)}
 
 /* segmented control */
-.seg{display:inline-flex;height:32px;border:1px solid var(--edge);border-radius:999px;overflow:hidden;flex:none;
+.seg{display:inline-flex;height:32px;border:1px solid var(--edge);border-radius:8px;overflow:hidden;flex:none;
   background:rgba(255,255,255,.03);box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
 .seg button{height:100%;border:none;border-left:1px solid var(--edge);border-radius:0;
   background:transparent;padding:0 11px;font-weight:600;font-size:12px;min-width:38px;justify-content:center;color:#aab6c8}
@@ -141,40 +153,38 @@ input[type=checkbox]:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(62,224
 /* result windows of the tries: mini views drawn on the shared canvas (scissor) beneath */
 #msDock{position:absolute;inset:10px 10px 52px 10px;z-index:5;display:flex;flex-wrap:wrap;align-content:flex-start;gap:8px;pointer-events:none;overflow:hidden}
 #msDock.many .msWin{width:124px}
-#msDock.many .msView{height:100px}
+#msDock.many .msView{height:96px}
 .msWin{pointer-events:auto;width:172px;border:1px solid var(--edge-hi);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;
   background:transparent;box-shadow:0 8px 22px -10px rgba(0,0,0,.75)}
 .msWin:hover{border-color:rgba(62,224,210,.45);box-shadow:0 0 18px -6px var(--glow-teal), 0 8px 22px -10px rgba(0,0,0,.75)}
-.msHead{display:flex;align-items:center;gap:6px;height:24px;padding:0 6px 0 8px;font-size:11px;font-weight:500;color:var(--muted);
+.msHead{display:flex;align-items:center;gap:6px;height:28px;padding:0 10px 0 13px;font-size:11px;font-weight:500;color:var(--muted);
   background:linear-gradient(180deg,rgba(20,27,40,.94),rgba(11,16,25,.9));
   border-bottom:1px solid rgba(150,170,210,.1);
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
   user-select:none;-webkit-user-select:none}
 .msHead .msTitle{font-weight:700;color:var(--txt);letter-spacing:.2px}
 .msHead .msE{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
-.msHead .msClose{display:none;height:18px;min-width:18px;padding:0 4px;font-size:13px;line-height:1;border-radius:5px;background:transparent;
+.msHead .msClose{display:none;height:18px;min-width:18px;padding:0 4px;font-size:13px;line-height:1;border-radius:3px;background:transparent;
   border:1px solid var(--edge-hi);color:var(--muted);cursor:pointer;box-shadow:none}
 .msHead .msClose:hover{color:var(--txt);border-color:rgba(62,224,210,.5);background:rgba(62,224,210,.08);box-shadow:none}
 .msWin{position:relative;cursor:pointer;transition:left .35s ease,top .35s ease,width .35s ease,height .35s ease,border-color .2s,box-shadow .2s}   /* клик — выбрать (попытка в главном виде); двойной клик по заголовку — раскрыть */
-.msView{width:100%;height:146px;touch-action:none;background:transparent}
+.msView{width:100%;height:142px;touch-action:none;background:transparent}
 /* markers (2.40): .best — record try («Min»): green frame + inner green outline (::after), energy in bold green;
    .shown — the try displayed in the main 3D view: bright outer outline and title (exactly one window or none) */
-.msWin.best{border-color:var(--green);
-  box-shadow:0 0 0 2px rgba(74,222,128,.45), 0 0 22px -4px var(--glow-green), 0 8px 22px -10px rgba(0,0,0,.75)}
-.msWin.best::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;box-shadow:inset 0 0 0 2px var(--green)}   /* внутренняя зелёная обводка — поверх заголовка тоже */
-.msWin.best .msHead{background:linear-gradient(180deg,rgba(20,38,34,.94),rgba(11,20,20,.9));border-bottom-color:rgba(74,222,128,.22)}
+.msWin.best{box-shadow:0 8px 22px -10px rgba(0,0,0,.75)}   /* лучшая: внешняя рамка обычная, признак — жирный зелёный контур внутри (::after) */
+.msWin.best::after{content:"";position:absolute;inset:5px;border-radius:6px;pointer-events:none;border:3px solid var(--green);z-index:2}   /* жирный зелёный контур чуть внутри от внешнего, поверх заголовка и вида */
+.msWin.best .msHead{background:linear-gradient(180deg,rgba(20,38,34,.94),rgba(11,20,20,.9));border-bottom-color:transparent}
 .msWin.best .msHead .msTitle{color:var(--green);text-shadow:0 0 8px var(--glow-green)}
 .msWin.best .msHead .msE{color:var(--green)}
 .msWin.best .msHead .msE b{font-weight:700;text-shadow:0 0 8px var(--glow-green)}
-.msWin.shown{border-color:rgba(236,243,255,.92);
-  box-shadow:0 0 0 2px rgba(236,243,255,.6), 0 0 22px -4px rgba(236,243,255,.4), 0 8px 22px -10px rgba(0,0,0,.75)}
+.msWin.shown{border-color:rgba(236,243,255,.95);box-shadow:0 8px 22px -10px rgba(0,0,0,.75)}   /* показанная в главном виде: жирный светлый контур по внешнему краю (::before — ровной толщины, поверх заголовка и вида) */
+.msWin.shown::before{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;border:3px solid rgba(236,243,255,.95);z-index:2}
 .msWin.shown .msHead .msTitle{color:#fff;text-shadow:0 0 8px rgba(255,255,255,.55)}
-.msWin.shown.best{border-color:rgba(236,243,255,.92);   /* both markers: bright outer outline + green inner outline (::after) */
-  box-shadow:0 0 0 2px rgba(236,243,255,.6), 0 0 22px -4px var(--glow-green), 0 8px 22px -10px rgba(0,0,0,.75)}
+.msWin.shown.best{border-color:rgba(236,243,255,.95)}   /* оба признака: светлый жирный контур снаружи + зелёный жирный внутри */
 .msWin.max{z-index:8;cursor:default;border-color:rgba(62,224,210,.55);
   box-shadow:0 0 0 1px rgba(62,224,210,.25), 0 0 28px -6px var(--glow-teal), 0 18px 40px -16px rgba(0,0,0,.9)}
-.msWin.max.best{border-color:var(--green);box-shadow:0 0 0 2px rgba(74,222,128,.45), 0 0 28px -6px var(--glow-green), 0 18px 40px -16px rgba(0,0,0,.9)}
-.msWin.max.shown{border-color:rgba(236,243,255,.92);box-shadow:0 0 0 2px rgba(236,243,255,.6), 0 0 28px -6px rgba(236,243,255,.35), 0 18px 40px -16px rgba(0,0,0,.9)}
+.msWin.max.best{box-shadow:0 18px 40px -16px rgba(0,0,0,.9)}
+.msWin.max.shown{border-color:rgba(236,243,255,.95);box-shadow:0 18px 40px -16px rgba(0,0,0,.9)}
 .msWin.max .msView{height:auto;flex:1;cursor:grab}
 .msWin.max .msView:active{cursor:grabbing}
 .msWin.max .msClose{display:inline-block}
@@ -195,7 +205,7 @@ input[type=checkbox]:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(62,224
 
 /* ---- buttons ---- */
 button{background:rgba(255,255,255,.05);color:var(--txt);border:1px solid var(--edge);flex:none;
-  height:32px;padding:0 12px;border-radius:999px;cursor:pointer;
+  height:32px;padding:0 12px;border-radius:8px;cursor:pointer;
   font-family:var(--font);font-size:12px;font-weight:600;line-height:1;letter-spacing:.2px;
   display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
@@ -263,7 +273,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   <!-- ================= LEFT: 2D drawing ================= -->
   <div id="left" class="pane">
     <div class="topbar">
-      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.0</span></span>
+      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.1</span></span>
       <button id="restoreLast" title="Restore the last drawing from telemetry">Last</button><button id="clear" class="ghost">Clear</button>
       <span class="seg" id="presets" title="Example knots">
         <button class="ex" data-knot="trefoil" title="Trefoil 3₁">3₁</button>
@@ -271,7 +281,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
         <button class="ex" data-knot="cinquefoil" title="Cinquefoil 5₁">5₁</button>
         <button class="ex" data-knot="septafoil" title="Septafoil 7₁">7₁</button>
       </span>
-      <span class="chip" title="Random diagram with the given number of crossings (over/under chosen at random); crossings are kept at least 1.5 marker radii apart"><button id="randKnot" class="ghost">Random</button><input id="randN" type="number" min="1" max="100" value="20" title="number of crossings, 1–100"></span>
+      <span class="chip" title="Random diagram with the given number of crossings (over/under chosen at random); crossings are kept at least 1.5 marker radii apart"><button id="randKnot" class="ghost">Random</button><input id="randN" type="number" min="1" max="250" value="20" title="number of crossings, 1–250"></span>
       <span class="buildTag" id="buildTag" title="Build version"></span>
       <span class="chip" id="crossInfo" title="Number of diagram crossings">×<b>0</b></span>
       <span class="chip" id="knotType" title="Diagram determinant: 1 — unknot (will straighten into a circle)">type <b>—</b></span>
@@ -283,6 +293,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
       <div class="vignette"></div>
     </div>
   </div>
+  <div id="splitter" title="Drag to resize the panes · double-click to reset"></div>
 
   <!-- ================= RIGHT: 3D view ================= -->
   <div id="right" class="pane">
@@ -294,7 +305,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
       <span class="chip" title="Tight packing: the knot shrinks to near contact (held only by contact repulsion). A separate mode — NOT stiffness"><label style="cursor:pointer">Tight <input type="checkbox" id="tightChk"></label></span>
       <span class="chip" title="Self-repulsion r, 1–10: strands cannot come closer than (w+r) units between axes; beyond that a 1/Δ⁴ repulsion (×5 since 2.35)">Repel. <input type="range" id="repCoef" min="1" max="10" step="1" value="2"><b id="repVal">2</b></span>
       <span class="chip" title="Number of tries (minimization attempts), 1–20: each try starts from the diagram with its own random heights of the knot parts; applies to the next run">Tries <input id="msN" type="number" min="1" max="20" value="5"></span>
-      <span class="chip" title="Stir move: loops — pull fan-shaped loops of the final shape out into free space (phase 1: the loop tips stay pinned in space while the knot anneals; phase 2: all points are released and the free knot anneals again); invert — conformal inside-out (2.23)">Stir <select id="stirMode"><option value="loops">loops</option><option value="invert">invert</option></select></span>
+      <span class="chip" title="Stir: inflate the final knot k times relative to the tube (the core starts at 1/k, is held, then grows back), then the tries run again">Stir ×<input id="stirInfl" type="number" min="1.5" max="50" step="0.5" value="10" title="inflate ×k: the knot is inflated k times relative to the tube (core starts at 1/k), then standard physics" style="width:44px"></span>
       <button id="play" class="go" title="Physics: run the tries · Pause · Stir: pull loops of the final shape out into free space (topology-safe; mode select: loops | inside-out inversion; falls back to pulling parts apart) and rerun the tries">▶ Physics</button>
       <button id="exportObj" class="ghost" title="Export the 3D model as OBJ">OBJ</button>
       <button id="exportTelem" class="ghost" title="Download relaxation telemetry for diagnostics">Telem</button>
@@ -356,6 +367,11 @@ let totalLen2D = 0;
 let crossings = [];      // {x,y, sA, sB, over: 'A'|'B'}  (s — длина дуги)
 let drawing = false, closedCurve = false;
 const START_R = 13;      // радиус стартового кружка для замыкания
+let _v2={s:1,tx:0,ty:0};   // вид 2D-холста: масштаб (≤1) и сдвиг, чтобы вся диаграмма была видна при сужении панели (данные не меняются)
+function fitView(){ const pts=closedCurve? smooth : null; if(!pts || pts.length<2){ _v2={s:1,tx:0,ty:0}; return; }
+  let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9; for(const q of pts){ if(q.x<minx)minx=q.x; if(q.x>maxx)maxx=q.x; if(q.y<miny)miny=q.y; if(q.y>maxy)maxy=q.y; }
+  const w=drawCv.clientWidth, h=drawCv.clientHeight, m=CROSS_R+14; let sc=Math.min((w-2*m)/Math.max(1,maxx-minx), (h-2*m)/Math.max(1,maxy-miny)); if(!(sc<1)) sc=1; if(sc<0.15) sc=0.15;
+  _v2={s:sc, tx:w/2-sc*(minx+maxx)/2, ty:h/2-sc*(miny+maxy)/2}; }
 
 function fitCanvas(){
   const r = drawCv.getBoundingClientRect();
@@ -366,7 +382,7 @@ function fitCanvas(){
 }
 function P(e){
   const r = drawCv.getBoundingClientRect();
-  return {x:e.clientX-r.left, y:e.clientY-r.top};
+  return {x:(e.clientX-r.left-_v2.tx)/_v2.s, y:(e.clientY-r.top-_v2.ty)/_v2.s};   // экран → координаты диаграммы (вид _v2)
 }
 function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
 
@@ -406,6 +422,7 @@ function finishCurve(doClose, quiet){
   buildSmooth();
   findCrossings();
   if(quiet) return;          // перебор кандидатов randomKnot: без отрисовки и 3D
+  autoThick();               // замкнутая кривая — начальная толщина по числу пересечений (трубку построит syncKnot3D)
   updateCrossInfo();
   document.getElementById('hint').textContent = crossings.length
     ? 'Click crossings to flip over/under — the 3D view updates immediately.'
@@ -537,6 +554,7 @@ function renderDraw(){
   const w=drawCv.clientWidth, h=drawCv.clientHeight;
   dctx.clearRect(0,0,w,h);
   drawDotGrid(w,h);
+  fitView(); dctx.setTransform(DPR*_v2.s,0,0,DPR*_v2.s,DPR*_v2.tx,DPR*_v2.ty);   // дальше — в координатах диаграммы
   // стартовый кружок
   const startPt = smooth.length?smooth[0]:(raw.length?raw[0]:null);
   // градиент вдоль холста: линия мягко переливается голубым → бирюзовым
@@ -588,6 +606,7 @@ function renderDraw(){
       dctx.strokeStyle=T.ring; dctx.lineWidth=1.5; dctx.stroke();
     }
   }
+  dctx.setTransform(DPR,0,0,DPR,0,0);
 }
 function getCSS(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
 // ТЕМА ХОЛСТОВ (2.17): цвета 2D-рисунка и 3D-сцены задаёт стиль страницы через CSS-переменные
@@ -660,6 +679,10 @@ function computeDeterminant(){
   const m=n-1, Asub=M.slice(0,m).map(r=>r.slice(0,m));
   return Math.abs(Math.round(intDet(Asub)));
 }
+function autoThick(){   // начальная толщина по числу пересечений (2026-09-14): 5 при ≤0, линейно к 1 при 100 (большой узел не помещается толстым); ползунок остаётся ручным
+  if(typeof window!=='undefined' && window.__noAutoThick) return;   // стенд: тесты задают толщину явно (harness.js ставит флаг)
+  const nc=crossings.length, D=5, w=Math.max(1, Math.round(D-(D-1)*Math.min(nc,100)/100)); const el=document.getElementById('thick');
+  thickCoef=w; if(el){ el.value=String(w); const v=document.getElementById('thickVal'); if(v) v.textContent=String(w); } updateGeomUnits(); }   // трубку перестраивает вызывающий (syncKnot3D после лифта); rebuildTube здесь менял траекторию стенда
 function updateKnotType(){
   knotDet=computeDeterminant(); isUnknot=(knotDet===1);
   const el=document.getElementById('knotType');
@@ -773,7 +796,7 @@ function _gdCurve(P, n, rnd, gW, theta, ax, ay){
   return pts;
 }
 function randomKnot(target){
-  target=Math.max(1, Math.min(100, Math.round(target||20)));
+  target=Math.max(1, Math.min(250, Math.round(target||20)));   // лимит 250 (2026-09-14)
   if(running) stopPhysics('');
   let seed=(Math.floor(Math.random()*2147483647))|1;
   const rnd=()=>{ seed=(Math.imul(seed,1103515245)+12345)&0x7fffffff; return seed/0x80000000; };   // строго <1
@@ -805,7 +828,7 @@ function randomKnot(target){
   finishCurve(true);
   if(!closedCurve){ setStatus('could not build a diagram (window not rendered?)'); return; }
   for(const c of crossings) c.over = rnd()<0.5?'A':'B';
-  updateKnotType(); renderDraw(); syncKnot3D();
+  updateKnotType(); autoThick(); renderDraw(); syncKnot3D();
   setStatus('random diagram: '+crossings.length+' crossings (grid '+g.n+'×'+g.n+'), over/under random · '+(isUnknot?'unknot':'det '+knotDet)
     +(crossings.length!==target ? ' · ⚠ requested '+target+(nHi>=nMax ? ' (window limit '+nMax+'×'+nMax+')' : ' (no exact grid found)') : '')+(ok?'':' · ⚠ crossings closer than 1.5 marker radii')+' · press ▶ Physics');
 }
@@ -897,7 +920,7 @@ function chooseN(worldLen){
   // узлу на 39 пересечений достаётся 285 точек и он геометрически не может
   // расправиться (нужно L/D ≈ 30+14·C толщин)
   const base=Math.max(120, Math.min(260, Math.round(worldLen/0.125)));
-  const byC=Math.min(600, 24*(crossings? crossings.length:0));
+  const C=crossings? crossings.length:0, byC=C<=100 ? Math.min(600, 24*C) : 600+6*(C-100);   // до 100 пересечений — как прежде (потолок 600); дальше +6 вершин на пересечение (250 → 1500; лимит 250, 2026-09-14)
   return Math.max(base, byC);
 }
 
@@ -1897,7 +1920,8 @@ function msRestoreBest(){   // вернуть лучшую попытку; её 
    другой центр/плоскость (STIR_REMAP_TRIES), затем запасной вариант — растаскивание 2.21. Каждая
    новая попытка серии после Stir (и каждый воркер) получает СВОЁ выворачивание исходной формы S0
    (другая «дыра»/плоскость) — максимальное разнообразие стартов. ---- */
-const STIR_SUB=8, STIR_REMAP_TRIES=6; let STIR_MODE='loops';   // режим Stir: loops | invert (воркер получает в s0.mode)
+const STIR_SUB=8, STIR_REMAP_TRIES=6; let STIR_MODE='inflate';   // основная программа: Stir = раздутие ×k (петли/выворачивание остаются в коде для лаборатории stir.html)
+let STIR_INFL=10, _inflStart=0, _inflCapK=0, _inflCapT0=0; const STIR_INFL_HOLD=600, STIR_INFL_RAMP=1500;   // расписание ядра после раздутия: удержание 1/k, затем геометрический подъём к номиналу   // Stir «inflate ×k» (лаборатория 2026-09-14): раздуть узел в k раз относительно трубки = ядро стартует с 1/k номинала; _inflStart — заявка на старт попытки (расходуется в startPhysics)   // режим Stir: loops | invert (воркер получает в s0.mode)
 const STIR_ARC=0.125, STIR_HR=[1.5,6], STIR_HMIN=0.25, STIR_SEP=45, STIR_K=[2,4], STIR_LEN=2.0, STIR_SKIP=0.3;   // 2026-09-14 по просьбе: петли вдвое уже (дуга 0.125·Rk) и больше (2–4), бюджет длины до n′≤3n
 // STIR_ARC — длина дуги (доля Rk); STIR_HR — высота петли H_t=U(1.5,6)·ρ_i, ρ_i=|X[i]−O| — исходное расстояние точки от центра (поправка E, 2026-09-13; H<0.8·1.5·ρ_i — отказ low);
 // STIR_HMIN — мин. высота бортов (доля Rk); STIR_SEP — мин. угол между направлениями петель (град); STIR_K — петель за ремап; STIR_LEN — кап добавки длины (доля N·L0):
@@ -2191,6 +2215,7 @@ function stirLoopsImage(X, L0v, seed, excl, sCore){   // образ S0 с пет
 function stirRemapOnce(seed){   // ремап S0 → verts (петли или выворачивание); проверки вложенности и det; null — отказ (verts возвращены к S0)
   const S0=_stirS0; _stirPins=null; _pinsFresh=false; if(!S0){ _stirLastRej='n'; return null; }   // пины — только от удачного ремапа петель
   if(S0.N!==N) _stirSetVerts(S0.verts, S0.L0); _stirN0=S0.N;   // ремап всегда от S0 с N0 вершинами (поправка F: попытка/воркер могут прийти с N'); L0 не меняется
+  if(STIR_MODE==='inflate'){ _stirSetVerts(S0.verts, S0.L0); recenter(); _stirPins=null; _pinsFresh=false; _inflStart=1/Math.max(1.01,STIR_INFL); return {mode:'inflate', k:STIR_INFL, disp:0, det:S0.det, detChecked:false}; }   // раздутие: S0 как есть, ядро с 1/k
   const rnd=_lcg(seed); const X=S0.verts.map(v=>[v.x,v.y,v.z]);
   _stirLastRej='';
   const r = STIR_MODE==='loops' ? stirLoopsImage(X, S0.L0, seed, _stirHoles, S0.s) : stirInvertImage(X, S0.L0, rnd, _stirHoles);
@@ -2218,7 +2243,7 @@ function stirRemapLift(seed){   // выворачивание S0 в отдель
   if(r){ f=new Float32Array(N*3); for(let i=0;i<N;i++){ f[3*i]=verts[i].x; f[3*i+1]=verts[i].y; f[3*i+2]=verts[i].z; } }
   _stirSetVerts(keep, L0k); return f;   // N мог измениться (поправка F)
 }
-function stirCancel(){ _stirS0=null; _stirHoles=[]; _stirN0=0; _stirPins=null; _pinsFresh=false; _pinPos=null; _pinMob=null; _stirPending=null; physChgCancel(); if(!_stir) return; _stir=null; _stirX0=null; const p=document.getElementById('play'); if(p){ p.disabled=false; p.textContent='▶ Physics'; p.classList.remove('stir'); } _playStir=false; }
+function stirCancel(){ _stirS0=null; _stirHoles=[]; _stirN0=0; _inflStart=0; _stirPins=null; _pinsFresh=false; _pinPos=null; _pinMob=null; _stirPending=null; physChgCancel(); if(!_stir) return; _stir=null; _stirX0=null; const p=document.getElementById('play'); if(p){ p.disabled=false; p.textContent='▶ Physics'; p.classList.remove('stir'); } _playStir=false; }
 let _playStir=false;        // единая кнопка: после финала серии «▶ Physics» становится «Stir»
 function stirEnable(on){ const b=document.getElementById('play'); if(!b) return; _playStir=!!on;
   if(on){ b.textContent='Stir'; b.classList.add('stir'); b.classList.remove('running'); b.disabled=false; }
@@ -2254,9 +2279,10 @@ function stirStart(){
     const d0=_detRobust(3);
     _stirS0={verts:verts.map(v=>v.clone()), N, L0, det:(d0!==null? d0 : _runDet), s:sNominal()}; _stirN0=N;   // ядро — один раз (в воркере _thickFit другой); N0 — к нему возвращает фаза 3
     if(!same){ _stirHoles=[]; _stirSeed=1+Math.floor(Math.random()*1e6); } }
-  { const el=document.getElementById('stirMode'); if(el && (el.value==='loops'||el.value==='invert')) STIR_MODE=el.value; }   // пустой мок стенда режим не перекрывает
-  _stir.mode='remap?'; _stir.rej=[]; setStatus(STIR_MODE==='loops'? 'stirring… pulling loops out' : 'stirring… turning inside out');
+  { const el=document.getElementById('stirMode'); if(el && (el.value==='loops'||el.value==='invert'||el.value==='inflate')) STIR_MODE=el.value; }   // пустой мок стенда режим не перекрывает
+  _stir.mode='remap?'; _stir.rej=[]; setStatus(STIR_MODE==='loops'? 'stirring… pulling loops out' : STIR_MODE==='inflate'? 'stirring… inflating ×'+STIR_INFL : 'stirring… turning inside out');
   const run=()=>{ if(!_stir) return;
+    if(STIR_MODE==='inflate'){ _stir.mode='inflate'; _stir.remap={mode:'inflate', k:STIR_INFL}; _stir.disp=0; _stir.i=1; _inflStart=1/Math.max(1.01,STIR_INFL); stirFinish(); return; }   // раздутие: форма S0 без изменений, ядро с 1/k
     let rm=null; for(let t=0; t<STIR_REMAP_TRIES && !rm; t++){ rm=stirRemapOnce(_stirSeed++); if(!rm){ _stir.rej.push(_stirLastRej); if(_stirTerminal(_stirLastRej)) break; } }
     if(rm){ _stir.mode=STIR_MODE; _stir.remap=rm; _stir.disp=rm.disp; _stir.i=1; stirFinish(); return; }
     _stirS0=null; _stirHoles=[]; _stirN0=0; _stir.mode='pull'; stirField(); setStatus('stirring… 0%'); };
@@ -2350,7 +2376,7 @@ function stirFinish(){
   }
   _fromLift=true; _liftFromDiagram=false;        // разрыхлённая форма — лифт новой серии попыток (без перестройки из диаграммы)
   startPhysics();
-  _stirWarn=warn; _stirNote = st.mode==='loops' ? ' · stirred ('+((st.remap&&st.remap.loops)? st.remap.loops.length : 0)+' loops out)' : st.mode==='invert' ? ' · stirred (inside out)' : ' · stirred (parts moved '+dispR.toFixed(1)+'·R'+(st.rej&&st.rej.length? '; remap rejected: '+st.rej.join(',') : '')+')';   // пометки на всю серию (startPhysics уже отработал)
+  _stirWarn=warn; _stirNote = st.mode==='inflate' ? ' · stirred (inflated ×'+(st.remap&&st.remap.k)+')' : st.mode==='loops' ? ' · stirred ('+((st.remap&&st.remap.loops)? st.remap.loops.length : 0)+' loops out)' : st.mode==='invert' ? ' · stirred (inside out)' : ' · stirred (parts moved '+dispR.toFixed(1)+'·R'+(st.rej&&st.rej.length? '; remap rejected: '+st.rej.join(',') : '')+')';   // пометки на всю серию (startPhysics уже отработал)
   _msStretchMild=true;
   if(runLog && _stirEv.length){ runLog.events=_stirEv.map(e=>({...e, st:0})); } _stirEv=[];
   setStatus(runStatus());
@@ -2398,7 +2424,8 @@ function parBest(P){   // лучший среди готовых результ�
 }
 function stirDeflateLive(){ updateGeomUnits(); const g=minSegGapRep(), sN=sNominal(); if(!(g>1.02*sN)) _inflate=Math.min(_inflate, Math.max(1e-4, g/(1.3*sN))); if(_stir) _stir.s=sN; }
 window.__knotStir=(k)=>{ if(!_stir && !stirStart()) return {started:false, running}; if(_stirPending){ const f=_stirPending; _stirPending=null; f(); } let c=0; while(_stir && c<(k||STIR_STEPS)){ stirStep(); c++; } return {stir:!!_stir, i:_stir?_stir.i:null, running, dbg:_dbgStir}; };
-window.__stirMode=(m)=>{ if(m==='loops'||m==='invert'){ STIR_MODE=m; const el=document.getElementById('stirMode'); if(el) el.value=m; } return STIR_MODE; };   // стенд: режим Stir до __knotStir
+window.__stirInfl=(k)=>{ if(k>1) STIR_INFL=k; const el=document.getElementById('stirInfl'); if(el) el.value=STIR_INFL; return STIR_INFL; };   // стенд: коэффициент раздутия
+window.__stirMode=(m)=>{ if(m==='loops'||m==='invert'||m==='inflate'){ STIR_MODE=m; const el=document.getElementById('stirMode'); if(el) el.value=m; } return STIR_MODE; };   // стенд: режим Stir до __knotStir
 window.__stirPin=(b)=>{ if(b!==undefined) STIR_PIN=!!b; return STIR_PIN; };   // стенд: пины до __knotStir (false — веер без фаз); в UI переключателя нет (2.40: пины всегда)
 function relaxStep(){
   if(!running || !verts.length) return;
@@ -2532,6 +2559,8 @@ function relaxStep(){
     let next=0;
     // ядро s_eff всегда ниже фактического зазора (иначе энергия бесконечна):
     // цель s_eff = gmin/1.3; принудительная ступень — не выше 0.95·gmin
+    let cap=1; if(_inflCapK>1){ const t=stepCounter-_inflCapT0; cap = t<STIR_INFL_HOLD ? 1/_inflCapK : Math.min(1, Math.pow(1/_inflCapK, 1-Math.min(1,(t-STIR_INFL_HOLD)/STIR_INFL_RAMP)));
+      if(cap>=1){ _inflCapK=0; if(_kBmul){ _annStep=0; _annLast=0; annApply(1); } } }   // расписание раздутия окончено — отжиг с полным разбросом заново
     if(accepted){ const want=_gminAcc/(1.3*sN); if(want>=_inflate*(1+KAPPA)) next=want; }
     if(next===0){ _inflStall++;
       if(_inflStall>=50 || (accepted && fRel<ftolI)){ const room=(accepted?_gminAcc:g0.gminRep)*0.95/sN;
@@ -2544,6 +2573,7 @@ function relaxStep(){
     if(stepCounter-_inflChkStep>=500){
       if(_inflate<_inflChkVal*1.03) _inflStall=Math.max(_inflStall,1000);
       _inflChkStep=stepCounter; _inflChkVal=_inflate; }
+    if(cap<1){ if(next>cap) next=cap; if(next>0 && next<=_inflate*1.001) next=0; if(_inflate>=cap*0.999){ _inflStall=0; _inflJammed=false; _inflChkStep=stepCounter; _inflChkVal=_inflate; } }   // расписание раздутия: и ратчет, и принудительная ступень не выше cap; упор в расписание — не застой
     if(_inflStall>=1000){ thinToFit(); return; }   // 2.34: ядро дальше не растёт — узел тоньше до помещающейся толщины и досчитывается (раньше — «does not fit»)
     if(next>0){
       _inflate=Math.min(1, next); if(_inflate>=1 && _thickGrow>0){ _thickGrow=0; _thickStep=Math.min(2, _thickStep*1.3); }   // рост удался целиком (2.36) — следующий шаг крупнее (2.38: только после удачи; после упора шаг остаётся 1.15)
@@ -3606,9 +3636,10 @@ function _workerSource(){
         knotDet=m.knotDet; isUnknot=!!m.isUnknot;   // тип диаграммы — для проверки лифта и логики окружности
         if(m.s0){   // 2.24: своё выворачивание S0 вокруг следующей «дыры» (дыры 0…k−1 уже заняты: главный поток и воркеры с меньшим k)
           _stirS0={verts:_vertsFromFlat(m.s0.verts), N:m.s0.verts.length/3, L0:(m.s0.L0>0? m.s0.L0 : L0), det:m.s0.det, s:m.s0.s}; _stirN0=_stirS0.N; STIR_MODE=m.s0.mode||STIR_MODE; if(m.s0.pin!==undefined) STIR_PIN=!!m.s0.pin; _stirHoles=m.s0.holes.map(_stirHoleClone); let seed=m.s0.seed;   // реплей — в режиме главного потока; N0/L0 — от S0, не от лифта (поправка F: лифт при N')
-          let own=null; for(let t=0; t<m.s0.k-1+STIR_REMAP_TRIES && !own; t++){ const keep=verts.map(v=>v.clone()), L0k=L0; const r=stirRemapOnce(seed++);
+          if(m.s0.mode==='inflate'){ _inflStart=1/Math.max(1.01, m.s0.infl||STIR_INFL); _stirPins=null; _pinsFresh=false; }   // раздутие: лифт = S0, ядро с 1/k (применит startPhysics)
+          else { let own=null; for(let t=0; t<m.s0.k-1+STIR_REMAP_TRIES && !own; t++){ const keep=verts.map(v=>v.clone()), L0k=L0; const r=stirRemapOnce(seed++);
             if(r && t>=m.s0.k-1) own=r; else if(r){ _stirSetVerts(keep, L0k); } else if(_stirTerminal(_stirLastRej)) break; }   // первые k−1 удач — дыры других воркеров (N ремапа может отличаться)
-          if(!own){ _stirSetVerts(_vertsFromFlat(m.lift), _stirS0.L0); applyStretch(0.7,0.7); _stirPins=null; _pinsFresh=false; }   // пины последнего (чужого) реплея — не наши
+          if(!own){ _stirSetVerts(_vertsFromFlat(m.lift), _stirS0.L0); applyStretch(0.7,0.7); _stirPins=null; _pinsFresh=false; } }   // пины последнего (чужого) реплея — не наши
           _stirS0=null; _stirHoles=[]; }
         else if(m.stretch) applyStretch(0.7, 0.7);
       }
@@ -3639,7 +3670,7 @@ function _setVertsFrom(vs){ verts=vs.map(v=>v.clone()); N=verts.length; if(!_fx 
   { let tl=0; for(let i=0;i<N;i++) tl+=verts[i].distanceTo(verts[(i+1)%N]); L0=tl/N; } updateGeomUnits(); }
 function parStart(kind){
   const carry=_msCarry; _msCarry=null;
-  const K=carry? Math.max(1, MULTI_START-1) : MULTI_START, W=Math.max(1, Math.min(K, (navigator.hardwareConcurrency||4)-1, 8));
+  const K=carry? Math.max(1, MULTI_START-1) : MULTI_START, W=Math.max(1, Math.min(K, (navigator.hardwareConcurrency||4)-1, 16));   // все попытки параллельно, если хватает ядер (до 16)
   const payload = kind==='diagram'
     ? {diagram:{raw:raw.map(p=>({x:p.x,y:p.y})), crossings:crossings.map(c=>({x:c.x,y:c.y,over:c.over}))}}
     : {lift:(()=>{ const f=new Float32Array(N*3); for(let i=0;i<N;i++){ f[3*i]=verts[i].x; f[3*i+1]=verts[i].y; f[3*i+2]=verts[i].z; } return f; })()};
@@ -3652,7 +3683,8 @@ function parStart(kind){
   _par={K, W, next:0, done:0, total:K, queue:[], jobs:[], active:new Map(), results:new Array(K).fill(null), kind, payload, preview:null, dirty:false, t0:performance.now(), failed:0, skipped:0, wins:[], s0:null, pins:pins0};
   if(kind==='lift' && _stirS0){   // 2.23/2.24: воркер k сам выворачивает S0 вокруг k-й «дыры» (главный поток не замораживается); N лифта может отличаться от N0 (поправка F)
     const n0=_stirS0.N, f=new Float32Array(n0*3); for(let i=0;i<n0;i++){ f[3*i]=_stirS0.verts[i].x; f[3*i+1]=_stirS0.verts[i].y; f[3*i+2]=_stirS0.verts[i].z; }
-    _par.s0={verts:f, N0:n0, L0:_stirS0.L0, det:_stirS0.det, s:_stirS0.s, mode:STIR_MODE, pin:STIR_PIN, holes:_stirHoles.map(_stirHoleClone), seed:_stirSeed}; _stirSeed+=K; }
+    _par.s0={verts:f, N0:n0, L0:_stirS0.L0, det:_stirS0.det, s:_stirS0.s, mode:STIR_MODE, pin:STIR_PIN, infl:STIR_INFL, holes:_stirHoles.map(_stirHoleClone), seed:_stirSeed}; _stirSeed+=K; }
+  _inflStart=0;   // заявка раздутия относится к попыткам воркеров, не к следующему старту главного потока
   if(kind==='diagram'){ _stirS0=null; _stirHoles=[]; _stirN0=0; }
   for(let k=0;k<K;k++) _par.wins.push(msResultAdd(k+1+_msOffset, NaN, _msLift, ' · running'));   // живые окна всех попыток: видно, что считаются одновременно
   for(let k=0;k<K;k++){ _par.jobs.push({slot:k+_msOffset, win:_par.wins[k]}); _par.queue.push(k); }   // задания воркеров
@@ -3897,6 +3929,7 @@ function startPhysics(){
     // ядро помещается (зазор > 1.02·s — возобновление из покоя, равновесие сидит у 1.1–1.3·s) — не сдувать:
     // сдувание с усиленным хвостом раздвигало узел на ~L0 при каждом возобновлении
     _inflate = (g1>1.02*sNominal()) ? 1 : Math.min(1, Math.max(1e-4, g1/(1.3*sNominal())));
+    if(_inflStart>0){ _inflate=Math.min(_inflate, _inflStart); _inflCapK=1/_inflStart; _inflCapT0=0; _inflStart=0; } else _inflCapK=0;   // Stir «inflate ×k»: ядро с 1/k номинала — узел раздут в k раз относительно трубки; ратчет раскроет
     _inflJammed=false; _inflChkVal=_inflate; _inflChkStep=0;
   }
   stepCounter=0; _nextSnap=25; _frameNo=0; recordEvery=1;
@@ -3971,7 +4004,8 @@ document.getElementById('play').onclick=()=>{
   const rd=()=>{ const v=Math.round(+el.value); if(v>=1 && v<=20) MULTI_START=v; };
   const fix=()=>{ let v=Math.round(+el.value); if(!(v>=1)) v=MULTI_START; v=Math.max(1, Math.min(20, v)); el.value=String(v); MULTI_START=v; };
   if(el){ el.oninput=rd; el.onchange=fix; rd(); } }
-{ const el=document.getElementById('stirMode'); if(el){ el.value=STIR_MODE; el.onchange=()=>{ if(el.value==='loops'||el.value==='invert') STIR_MODE=el.value; }; } }   // режим Stir: loops | invert
+{ const el=document.getElementById('stirMode'); if(el){ el.value=STIR_MODE; el.onchange=()=>{ if(el.value==='loops'||el.value==='invert'||el.value==='inflate') STIR_MODE=el.value; }; } }
+{ const el=document.getElementById('stirInfl'); if(el && el.type==='number'){ el.value=STIR_INFL; el.onchange=()=>{ const k=+el.value; if(k>1) STIR_INFL=k; }; } }   // коэффициент раздутия   // режим Stir: loops | invert
 
 const bendCoefEl=document.getElementById('bendCoef'), repCoefEl=document.getElementById('repCoef');
 const thick=document.getElementById('thick');
@@ -4086,6 +4120,17 @@ document.getElementById('exportObj').onclick=exportOBJ;
 document.getElementById('exportTelem').onclick=exportTelemetry;
 
 window.addEventListener('resize', fitCanvas);
+{ const sp=document.getElementById('splitter'), app=document.getElementById('app');   // граница панелей: --leftW на #app, запоминается в localStorage
+  const relayout=()=>{ fitCanvas(); if(typeof onResize==='function') onResize(); };
+  const setW=(px)=>{ const r=app.getBoundingClientRect(); const w=Math.round(Math.max(240, Math.min(r.width-340-7, px))); app.style.setProperty('--leftW', w+'px'); try{ localStorage.setItem('knot.leftW', String(w)); }catch(e){} relayout(); return w; };
+  try{ const v=+localStorage.getItem('knot.leftW'); if(v>0) setW(v); }catch(e){}
+  if(sp && sp.addEventListener){ let drag=false;
+    sp.addEventListener('pointerdown', ev=>{ drag=true; sp.classList.add('drag'); try{ sp.setPointerCapture(ev.pointerId); }catch(e){} });   // без preventDefault: иначе браузер глушит dblclick (сброс)
+    sp.addEventListener('pointermove', ev=>{ if(!drag) return; const r=app.getBoundingClientRect(); setW(ev.clientX-r.left-3); });
+    const end=ev=>{ if(!drag) return; drag=false; sp.classList.remove('drag'); try{ sp.releasePointerCapture(ev.pointerId); }catch(e){} };
+    sp.addEventListener('pointerup', end); sp.addEventListener('pointercancel', end);
+    sp.addEventListener('dblclick', ()=>{ app.style.removeProperty('--leftW'); try{ localStorage.removeItem('knot.leftW'); }catch(e){} relayout(); }); }
+  window.__setLeftW=setW; }
 
 // отладочный люк: снимок состояния релаксации из консоли / автотестов
 window.__knotDebug=()=>({ running, settleCount, N, L0:+L0.toFixed(5), detReverts:_dbgDetReverts, runDet:_runDet, cap:+_capScale.toFixed(3),
@@ -4231,7 +4276,7 @@ window.__knotSetVerts=(arr)=>{ if(!arr||arr.length<8) return false; _liftFromDia
   N=verts.length; allocBuffers(); resampleEqualArc(); recenter();
   rebuildTube(); fitCamera(false); return {N,L0:+L0.toFixed(5)}; };
 // ВЕРСИЯ ИНТЕРФЕЙСА: X задаёт пользователь, Y растёт на 1 с каждой новой сборкой
-const APP_VER_MAJOR=3, APP_VER_MINOR=0;   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
+const APP_VER_MAJOR=3, APP_VER_MINOR=1;   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
 const APP_VERSION=APP_VER_MAJOR+'.'+APP_VER_MINOR;   // 3.0, 3.1, … (с 3.0 без дополнения нулём)
 window.__buildTag='v'+APP_VERSION;
 { const el=document.getElementById('appVer'); if(el) el.textContent=APP_VERSION; }

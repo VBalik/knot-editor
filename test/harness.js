@@ -75,6 +75,7 @@ function def(name, value){
   catch(_) { try { sandbox[name]=value; } catch(__){} }
 }
 def('window', sandbox);
+def('__noAutoThick', true);           // стенд: тесты задают толщину явно (autoThick страницы отключён)
 def('addEventListener', ()=>{});            // window.addEventListener (window===global)
 def('removeEventListener', ()=>{});
 def('document', documentMock);

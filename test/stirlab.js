@@ -88,7 +88,7 @@
         applyStretch(0.7,0.7); _fromLift=true; _liftFromDiagram=false; startPhysics();   // попытка 1 — растянутый S0 (мягко: (0.4,2.2) на релаксированном S0 при W=3 заклинивает, см. stir.html _msStretchMild)
         _msLift=S0.verts.map(v=>v.clone()); _msStretchMild=true;   // следующие попытки: msNextLift берёт S0, startPhysics растягивает (0.7, 0.7)
         r2=runToEnd(); }
-      else { window.__stirMode(base); window.__stirPin(base==='loops' && !nopin); rr=window.__knotStir(); dbg=_dbgStir; r2=rr.running? runArm() : {steps:0, settled:false, tries:[]}; }   // пины до __knotStir
+      else { window.__stirMode(base); window.__stirPin(base==='loops' && !nopin); if(base==='inflate' && opts[0]) window.__stirInfl(+opts[0]); rr=window.__knotStir(); dbg=_dbgStir; r2=rr.running? runArm() : {steps:0, settled:false, tries:[]}; }   // пины до __knotStir
       const bs=basin(S0, rec.phys.min);
       const M=rec.modes[mode]={sameS0:hs===rec.h0, pin:(base==='loops')? window.__stirPin() : null, pins:(dbg&&dbg.remap&&dbg.remap.pins)||null, dbg:dbg && {mode:dbg.mode, remap:dbg.remap, rej:dbg.rej, det0:dbg.det0, det1:dbg.det1, tooTight:dbg.tooTight, disp_R:dbg.disp_R}, ...r2,
         sec:+((Date.now()-t0)/1000).toFixed(0), E:es(), min:mn(es()), status:H.dbg().status.slice(0,140),

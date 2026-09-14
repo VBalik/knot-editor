@@ -13,3 +13,5 @@ market-shapes/
 *.tmp
 test/wf_*.js
 test/wasm/knots.json
+publish/
+publish.zip
