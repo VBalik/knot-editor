@@ -1130,6 +1130,15 @@ stir8 — выворачивание, corners, jamwhy, thinfit, wsyntax) зел�
 
 ## Проект и публикация
 
+- **Облачные сессии Claude Code (2026-09-15).** Правила проекта для любой сессии, в том
+  числе облачной, — в `CLAUDE.md` в корне репозитория (облако не видит память с Mac).
+  `.claude/settings.json` и `.claude/launch.json` теперь в репозитории (игнорируется только
+  `.claude/settings.local.json`); хук SessionStart ставит пакеты стенда `npm ci` в `test/`,
+  если их нет. `test/imgphoto.js` декодирует JPEG и PNG на чистом JS (`jpeg-js`, `pngjs`)
+  и уменьшает картинку усреднением по площади до 1600 по длинной стороне, как браузер;
+  macOS-программа `sips` больше не нужна. Результаты те же: фото — 20 пересечений, det 245;
+  «гитара» — 20, det 1, и её копия 800 px — тоже.
+
 - Папка: `/Users/balik/Library/CloudStorage/GoogleDrive-gbalik@gmail.com/My Drive/Programming/Claude/Knots/` (git, ветка main).
 - Репозиторий: https://github.com/VBalik/knot-editor (публичный).
   Живой сайт: https://vbalik.github.io/knot-editor/
