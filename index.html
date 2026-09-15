@@ -278,7 +278,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   <!-- ================= LEFT: 2D drawing ================= -->
   <div id="left" class="pane">
     <div class="topbar">
-      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.6</span></span>
+      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.7</span></span>
       <button id="restoreLast" title="Restore the last drawing from telemetry">Last</button><button id="clear" class="ghost">Clear</button>
       <span class="seg" id="presets" title="Example knots">
         <button class="ex" data-knot="trefoil" title="Trefoil 3₁">3₁</button>
@@ -1800,7 +1800,7 @@ const REP_GAIN=1, REP_FORCE=5;               // 2.35: ядро (w+REP_GAIN·r)·
 // «does not fit». Каждая попытка начинает с полной толщины; смена ползунков — снова с полной
 let _thickFit=1, _msThick=[], _thickDone=false, _thickGrow=0, _thickTries=0, _thickStep=1.15, _coreKey='';   // _coreKey — Thick|Repel, при которых действует утоньшение   // _thickGrow — толщина, с которой пробуем расти; _thickStep — шаг роста (растёт при удаче, сбрасывается при упоре); _thickDone — упёрлись
 function thickOf(x){ return (x && x.thick>0)? x.thick : 1; }
-function betterRes(E1, t1, E2, t2){ if(!isFinite(E1)) return false; if(!isFinite(E2)) return true; if(Math.abs(t1-t2)>0.005) return t1>t2; return E1<E2; }   // сначала толще (ближе к заданной), при равной толщине — ниже энергия
+function betterRes(E1, t1, E2, t2){ if(!isFinite(E1)) return false; if(!isFinite(E2)) return true; if(Math.abs(t1-t2)>0.005) return t1>t2; return E1<E2 && fmtE(E1)!==fmtE(E2); }   // сначала толще (ближе к заданной), при равной толщине — ниже энергия; 3.7: энергия, равная рекордной в показанных цифрах, рекорд не отбирает
 function fmtThick(t){ return t>=0.995? '100%' : (t>=0.01? Math.round(100*t)+'%' : '<1%'); }
 // ЯДРО (2.35): снова (w+r)·u, как в исходном ТЗ. В 2.21 просьба «отталкивание в 5 раз сильнее» была
 // исполнена как ядро (w+5r)·u — невидимая запретная зона в 5–18 раз шире нарисованной трубки; узел
@@ -2942,8 +2942,10 @@ function msEndNotes(msg){   // общие пометки обоих концов
   return msg;
 }
 function parBest(P){   // лучший среди готовых результатов серии (ключи ползунков не учитываются: 2.40 — результаты не устаревают)
-  let best=null;
-  for(let k=0;k<P.jobs.length;k++){ const r=P.results[k]; if(!r || !P.jobs[k]) continue;
+  let best=null; const order=[];   // 3.7: сначала попытка окна с зелёной рамкой — при равной в показанных цифрах энергии главный вид и рамка остаются на одной попытке
+  for(let k=0;k<P.jobs.length;k++) if(P.jobs[k] && P.jobs[k].win && P.jobs[k].win===_msBestWin) order.push(k);
+  for(let k=0;k<P.jobs.length;k++) if(order.indexOf(k)<0) order.push(k);
+  for(const k of order){ const r=P.results[k]; if(!r || !P.jobs[k]) continue;
     if(!r.failed && isFinite(r.E) && (!best || betterRes(r.E, thickOf(r), best.E, thickOf(best)))) best={E:r.E, verts:r.verts.map(v=>v.clone()), msg:r.note||'', round:k, det:r.det, runDet:r.runDet, liftWarn:r.liftWarn||'', key:r.key, thick:thickOf(r)}; }
   _msBest=best; return best;
 }
@@ -3652,7 +3654,7 @@ function rebuildTube(full){
    двойной клик по заголовку — раскрыть; лучшая попытка — класс best и «Min» в подписи (msWinCapSync).
    В безголовом стенде DOM/GL нет — данные сохраняются, окно не создаётся. ---- */
 let _msWins=[], _msCarry=null, _msOffset=0;   // _msCarry — лучшая попытка, переносимая в новую серию после Stir (окно №1); _msOffset — сдвиг нумерации новых попыток
-let _msSel=null, _msShown=null;   // 2.40: _msSel — окно, выбранное кликом (главный вид показывает его попытку); _msShown — окно, чей узел сейчас в главном виде (класс shown: ровно одно или ни одного)
+let _msSel=null, _msShown=null, _msBestWin=null;   // 3.7: _msBestWin — окно с зелёной рамкой («Min»); рекорд «липкий»   // 2.40: _msSel — окно, выбранное кликом (главный вид показывает его попытку); _msShown — окно, чей узел сейчас в главном виде (класс shown: ровно одно или ни одного)
 function msSetShown(w){ _msShown=(w && _msWins.indexOf(w)>=0)? w : null; for(const o of _msWins){ try{ if(o.el && o.el.classList) o.el.classList.toggle('shown', o===_msShown); }catch(e){} } }
 function msWinCaption(w, isBest){   // подпись окна: «E 0.259 [Min] [· 59% thick]» (Min — у лучшего, число жирным) или текст пометки (running / skipped / stopped / failed / does not fit)
   if(isFinite(w.E)) return 'E '+(isBest? '<b>'+fmtE(w.E)+'</b> Min' : fmtE(w.E))+(w.thick<0.995? ' · '+fmtThick(w.thick)+' thick' : '');
@@ -3663,7 +3665,7 @@ function msWinCapSync(w, isBest){   // единственное место, гд
 function msWinsClear(){
   for(const w of _msWins){ try{ if(w.controls) w.controls.dispose(); if(w.mesh) w.mesh.geometry.dispose();
     if(w.el && w.el.parentNode) w.el.parentNode.removeChild(w.el); }catch(e){} }
-  _msWins=[]; _msMax=null; _msSel=null; _msShown=null;
+  _msWins=[]; _msMax=null; _msSel=null; _msShown=null; _msBestWin=null;
   try{ const dock=document.getElementById('msDock'); if(dock){ for(const sp of dock.querySelectorAll('.msSpacer')) sp.remove(); } }catch(e){}
 }
 function msResultAdd(k, E, vs, note, thick){
@@ -3728,7 +3730,10 @@ function msWinCap(w, text){   // пометка окна без результа
   if(!w) return; w.note=' · '+text; msWinCapSync(w);
 }
 function msMarkBest(){   // рекордная попытка — яркая рамка и «Min» в подписи; у прежнего лучшего рамка и суффикс снимаются
-  let best=null; for(const w of _msWins){ if(isFinite(w.E) && (!best || betterRes(w.E, thickOf(w), best.E, thickOf(best)))) best=w; }
+  // 3.7: рекорд «липкий» — помеченное окно остаётся рекордным, пока другое не лучше в показанных цифрах энергии (или толще); порядок окон и порядок завершения попыток не важны
+  let best=(_msBestWin && _msWins.indexOf(_msBestWin)>=0 && isFinite(_msBestWin.E))? _msBestWin : null;
+  for(const w of _msWins){ if(w===best || !isFinite(w.E)) continue; if(!best || betterRes(w.E, thickOf(w), best.E, thickOf(best))) best=w; }
+  _msBestWin=best;
   for(const w of _msWins) msWinCapSync(w, w===best);
   return best;
 }
@@ -4810,7 +4815,7 @@ window.__knotSetVerts=(arr)=>{ if(!arr||arr.length<8) return false; _liftFromDia
   N=verts.length; allocBuffers(); resampleEqualArc(); recenter();
   rebuildTube(); fitCamera(false); return {N,L0:+L0.toFixed(5)}; };
 // ВЕРСИЯ ИНТЕРФЕЙСА: X задаёт пользователь, Y растёт на 1 с каждой новой сборкой
-const APP_VER_MAJOR=3, APP_VER_MINOR=6;   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
+const APP_VER_MAJOR=3, APP_VER_MINOR=7;   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
 const APP_VERSION=APP_VER_MAJOR+'.'+APP_VER_MINOR;   // 3.0, 3.1, … (с 3.0 без дополнения нулём)
 window.__buildTag='v'+APP_VERSION;
 { const el=document.getElementById('appVer'); if(el) el.textContent=APP_VERSION; }
