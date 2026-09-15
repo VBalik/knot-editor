@@ -278,7 +278,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   <!-- ================= LEFT: 2D drawing ================= -->
   <div id="left" class="pane">
     <div class="topbar">
-      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.7</span></span>
+      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.8</span></span>
       <button id="restoreLast" title="Restore the last drawing from telemetry">Last</button><button id="clear" class="ghost">Clear</button>
       <span class="seg" id="presets" title="Example knots">
         <button class="ex" data-knot="trefoil" title="Trefoil 3₁">3₁</button>
@@ -831,6 +831,20 @@ function _ikPrune(G){   // шпоры, короткие перемычки ме�
       const A=e.a>=0? find(e.a) : -1, B=e.b>=0? find(e.b) : -1, L=len(e);
       const dA=A>=0? deg[A] : 1, dB=B>=0? deg[B] : 1, hA=A>=0? C[A].hw : e.hw, hB=B>=0? C[B].hw : e.hw;
       if(A>=0 && A===B){ if(L<Math.max(5, 4*hA)){ e.alive=false; ch=true; break; } continue; }            // крошечная петля на развилке (незалитая дырка)
+      if(A>=0 && B>=0 && dA>=3 && dB>=3){   // 3.8: «линза» — двойной след пера: два коротких близких ребра между одними узлами; тонкое убрать (узлы станут степени 2 и растворятся)
+        const hm=Math.max(hA,hB), chord=Math.hypot(C[A].x-C[B].x, C[A].y-C[B].y);
+        if(L<=14*hm+10 && L<=2.2*chord+6*hm){
+          for(const q of (adj.get(A)||[])){ const f=q.e; if(f===e || !f.alive || f.loop) continue; const fo=q.s===0? f.b : f.a; if(fo<0 || find(fo)!==B) continue;
+            const Lf=len(f); if(Lf>1.8*L || L>1.8*Lf) continue;
+            const Sh=L<=Lf? e : f, Lg=Sh===e? f : e; let sep=0;
+            for(let k=0;k<Sh.xs.length;k+=2){ let m2=Infinity; for(let t=0;t<Lg.xs.length;t++){ const dx=Sh.xs[k]-Lg.xs[t], dy=Sh.ys[k]-Lg.ys[t], d2=dx*dx+dy*dy; if(d2<m2) m2=d2; } if(m2>sep) sep=m2; }
+            if(Math.sqrt(sep)<=4*hm+3){ (Sh.hw<=Lg.hw? Sh : Lg).alive=false; ch=true; break; } }
+          if(ch) break; } }
+      if((dA===1 && dB===3) || (dB===1 && dA===3)){   // 3.8: короткая шпора вдоль соседней ветви — второй след пера, а не нижняя прядь (та подходит к верхней поперёк)
+        const Xn=dA===3? A : B, sx=dA===3? 0 : 1, hX=dA===3? hA : hB;
+        if(Xn>=0 && L<=10*hX+8){ const lv=_ikDir(e, sx, C, Xn, -1); let para=false;
+          for(const q of (adj.get(Xn)||[])){ if(q.e===e || !q.e.alive || q.e.loop) continue; const oc=q.s===0? q.e.b : q.e.a, v=_ikDir(q.e, q.s, C, Xn, oc>=0? find(oc) : -1); if(lv.x*v.x+lv.y*v.y>0.86){ para=true; break; } }
+          if(para){ e.alive=false; ch=true; break; } } }
       if((dA===1 && dB>=3) || (dB===1 && dA>=3)){ const h=dA>=3? hA : hB; if(L<Math.max(3, 1.6*h+1)){ e.alive=false; ch=true; break; } }   // шпора
       if(dA===3 && dB===3 && A>=0 && B>=0 && L>hA+hB+2 && L<=Math.max(hA+hB+2, 8*Math.max(hA,hB)+6)){   // вытянутый X: пологое пересечение, пряди слиты на длине перемычки
         const ext=(X)=>(adj.get(X)||[]).filter(q=>q.e!==e), xa=ext(A), xb=ext(B);
@@ -900,34 +914,51 @@ function _ikRuns(pts, mask, W, H){   // штрихи поперёк моста: 
 }
 function _ikMatch(F, mask, W, H, diag, hwMed){   // сшивка свободных концов: стоимость = длина × углы × (разрыв поперёк одного штриха — дёшево)
   const nF=F.length, Lmax=Math.min(0.35*diag, 18*hwMed+24), cand=[], by=Array.from({length:nF},()=>[]);
-  const evalPair=(i,j,relax)=>{ const a=F[i], b=F[j], dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy);
-    if(L>(relax? 0.6*diag : Lmax)) return null;
-    let ai=1, aj=1; if(L>2){ const ux=dx/L, uy=dy/L; ai=a.tx*ux+a.ty*uy; aj=-(b.tx*ux+b.ty*uy); if(!relax && (ai<0.2 || aj<0.2)) return null; if(relax && (ai<-0.5 || aj<-0.5)) return null; }
+  const evalPair=(i,j)=>{ const a=F[i], b=F[j], dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy);
+    if(L>Lmax) return null;
+    let ai=1, aj=1; if(L>2){ const ux=dx/L, uy=dy/L; ai=a.tx*ux+a.ty*uy; aj=-(b.tx*ux+b.ty*uy); if(ai<0.2 || aj<0.2) return null; }
     const turn=1+(a.tx*b.tx+a.ty*b.ty), pts=_ikHermite(a.x,a.y,a.tx,a.ty,b.x,b.y,b.tx,b.ty,Math.max(L,1),1), pr=_ikRuns(pts,mask,W,H), nr=pr.runs.length, st=(a.stub>=0)+(b.stub>=0);
-    if(nr>=3 && !relax) return null;
+    if(nr>=3) return null;
     let longRun=false; for(const r of pr.runs) if(r[1]-r[0]+1 > 6*hwMed+6) longRun=true;
     let fac; if(st===2) fac=3; else if(st===1) fac=nr===0? 0.55 : 2.5; else if(nr===1) fac=longRun? 3 : 0.55; else if(nr===0) fac=(L<=2.5*(a.hw+b.hw)+6)? 0.8 : 2.2; else fac=(nr===2 && !longRun && ai>0.8 && aj>0.8 && turn<0.4)? 1.0 : 1.8+nr;   // два штриха подряд под одним разрывом (близкие пересечения) — если мост прямой
     if(pr.allInk && st===0) fac=Math.max(fac, 1.2);
     return {i, j, L, nr, pts, runs:pr.runs, cost:(L+2*hwMed)*(1+2*(1-ai)+2*(1-aj)+0.6*turn)*fac}; };
+  // 3.8: разрывы пера — концы ближе R1, между которыми нет поперечного штриха (в том числе куски бок о бок): одна линия, стыкуются до остальной сшивки
+  const R1=Math.max(5, 3.5*hwMed), brk=[], taken=new Uint8Array(nF);
+  { const bc=[]; for(let i=0;i<nF;i++){ if(F[i].stub>=0) continue; for(let j=i+1;j<nF;j++){ if(F[j].stub>=0 || (F[i].key>>1)===(F[j].key>>1)) continue; const L=Math.hypot(F[j].x-F[i].x, F[j].y-F[i].y); if(L>R1) continue;   // два конца одного куска (короткий штрих между разрывами) — не разрыв пера
+        if(-(F[i].tx*F[j].tx+F[i].ty*F[j].ty) < -0.3) continue;
+        const k=Math.max(2, Math.ceil(L)), pts=[]; for(let t=0;t<=k;t++) pts.push([F[i].x+(F[j].x-F[i].x)*t/k, F[i].y+(F[j].y-F[i].y)*t/k]);
+        const pr=_ikRuns(pts, mask, W, H); if(pr.runs.length && !pr.allInk) continue; bc.push({i, j, L, pts}); } }
+    bc.sort((p,q)=>p.L-q.L); for(const c of bc) if(!taken[c.i] && !taken[c.j]){ taken[c.i]=taken[c.j]=1; brk.push({i:c.i, j:c.j, L:c.L, nr:0, pts:c.pts, runs:[], cost:0.1*c.L, brk:true}); } }
   const seen=new Set();   // кандидаты — 12 ближайших концов в пределах Lmax (без перебора всех пар: шумная картинка давала тысячи концов и миллионы мостов)
-  for(let i=0;i<nF;i++){ const d=[]; for(let j=0;j<nF;j++){ if(j===i) continue; const L=Math.hypot(F[j].x-F[i].x, F[j].y-F[i].y); if(L<=Lmax) d.push([L,j]); }
+  for(let i=0;i<nF;i++){ if(taken[i]) continue; const d=[]; for(let j=0;j<nF;j++){ if(j===i || taken[j]) continue; const L=Math.hypot(F[j].x-F[i].x, F[j].y-F[i].y); if(L<=Lmax) d.push([L,j]); }
     d.sort((p,q)=>p[0]-q[0]);
-    for(let t=0; t<d.length && t<12; t++){ const a=Math.min(i,d[t][1]), b=Math.max(i,d[t][1]), key=a*nF+b; if(seen.has(key)) continue; seen.add(key); const c=evalPair(a,b,false); if(c){ cand.push(c); by[a].push(c); by[b].push(c); } } }
+    for(let t=0; t<d.length && t<12; t++){ const a=Math.min(i,d[t][1]), b=Math.max(i,d[t][1]), key=a*nF+b; if(seen.has(key)) continue; seen.add(key); const c=evalPair(a,b); if(c){ cand.push(c); by[a].push(c); by[b].push(c); } } }
   cand.sort((p,q)=>p.cost-q.cost);
   const mate=new Int32Array(nF).fill(-1), pc=new Array(nF).fill(null);
   const take=(c)=>{ mate[c.i]=c.j; mate[c.j]=c.i; pc[c.i]=pc[c.j]=c; }, drop=(c)=>{ mate[c.i]=mate[c.j]=-1; pc[c.i]=pc[c.j]=null; };
+  for(const c of brk) take(c);
   for(const c of cand) if(mate[c.i]<0 && mate[c.j]<0) take(c);
   const get=(i,j)=>{ for(const c of by[i]) if((c.i===i&&c.j===j)||(c.i===j&&c.j===i)) return c; return null; };
   for(let round=0; round<6; round++){ let imp=false;   // 2-opt: (a,b)+(c,d) → (a,c)+(b,d)
-    for(let a=0;a<nF;a++){ const ab=pc[a]; if(!ab) continue; const b=mate[a];
+    for(let a=0;a<nF;a++){ const ab=pc[a]; if(!ab || ab.brk) continue; const b=mate[a];
       for(const ac of by[a]){ const c=ac.i===a? ac.j : ac.i; if(c===b) continue; const d=mate[c];
         if(d<0){ if(ac.cost<ab.cost){ drop(ab); take(ac); imp=true; break; } continue; }
-        const cd=pc[c], bd=get(b,d); if(!bd || d===a) continue;
+        const cd=pc[c], bd=get(b,d); if(!bd || d===a || (cd && cd.brk)) continue;
         if(ac.cost+bd.cost < ab.cost+cd.cost-1e-9){ drop(ab); drop(cd); take(ac); take(bd); imp=true; break; } } }
     if(!imp) break; }
-  const lone=[]; for(let i=0;i<nF;i++) if(mate[i]<0) lone.push(i);   // остатки — с ослабленными условиями
-  if(lone.length>=2 && lone.length<=40){ const rc=[]; for(let x=0;x<lone.length;x++) for(let y=x+1;y<lone.length;y++){ const c=evalPair(lone[x],lone[y],true); if(c) rc.push(c); }
-    rc.sort((p,q)=>p.cost-q.cost); for(const c of rc) if(mate[c.i]<0 && mate[c.j]<0){ c.relaxed=true; take(c); } }
+  // 3.8: вместо «ослабленного» добора через весь рисунок — строгий второй проход для оставшихся концов: длинный разрыв под двумя-тремя соседними штрихами
+  // (толстые линии). Только концы навстречу друг другу, каждый пересечённый штрих узкий (поперёк, а не вдоль), касания в 1–2 px не считаются, пустой длинный мост запрещён
+  { const lone=[]; for(let i=0;i<nF;i++) if(mate[i]<0 && !taken[i]) lone.push(i);
+    if(lone.length>=2 && lone.length<=60){ const L2=Math.min(0.35*diag, 2.5*Lmax), gz=Math.max(2, 0.6*hwMed), rc=[];
+      for(let x=0;x<lone.length;x++) for(let y=x+1;y<lone.length;y++){ const i=lone[x], j=lone[y], a=F[i], b=F[j]; if(a.stub>=0 && b.stub>=0) continue;
+        const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy); if(L>L2 || L<2) continue;
+        const ux=dx/L, uy=dy/L, ai=a.tx*ux+a.ty*uy, aj=-(b.tx*ux+b.ty*uy); if(ai<0.6 || aj<0.6) continue;
+        const pts=_ikHermite(a.x,a.y,a.tx,a.ty,b.x,b.y,b.tx,b.ty,L,1), pr=_ikRuns(pts,mask,W,H); if(pr.allInk) continue;
+        const runs=pr.runs.filter(r=>r[1]-r[0]+1>gz); if(!runs.length || runs.length>4 || runs.some(r=>r[1]-r[0]+1>3*hwMed+4)) continue;
+        const turn=1+(a.tx*b.tx+a.ty*b.ty);
+        rc.push({i, j, L, nr:runs.length, pts, runs, cost:(L+2*hwMed)*(1+2*(1-ai)+2*(1-aj)+0.6*turn)*(1.5+0.5*runs.length), far:true}); }
+      rc.sort((p,q)=>p.cost-q.cost); for(const c of rc) if(mate[c.i]<0 && mate[c.j]<0) take(c); } }
   const out=[]; for(let i=0;i<nF;i++) if(pc[i] && pc[i].i===i) out.push(pc[i]);
   return {pairs:out, lone:[...Array(nF).keys()].filter(i=>mate[i]<0)};
 }
@@ -4815,7 +4846,7 @@ window.__knotSetVerts=(arr)=>{ if(!arr||arr.length<8) return false; _liftFromDia
   N=verts.length; allocBuffers(); resampleEqualArc(); recenter();
   rebuildTube(); fitCamera(false); return {N,L0:+L0.toFixed(5)}; };
 // ВЕРСИЯ ИНТЕРФЕЙСА: X задаёт пользователь, Y растёт на 1 с каждой новой сборкой
-const APP_VER_MAJOR=3, APP_VER_MINOR=7;   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
+const APP_VER_MAJOR=3, APP_VER_MINOR=8;   // 3.8 (2026-09-15): распознавание рисунка пером с двойным следом — «линза» и параллельная шпора в скелете, стык разрывов пера, без «ослабленных» мостов через весь рисунок, строгий второй проход для оставшихся концов   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
 const APP_VERSION=APP_VER_MAJOR+'.'+APP_VER_MINOR;   // 3.0, 3.1, … (с 3.0 без дополнения нулём)
 window.__buildTag='v'+APP_VERSION;
 { const el=document.getElementById('appVer'); if(el) el.textContent=APP_VERSION; }
