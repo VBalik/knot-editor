@@ -1138,6 +1138,11 @@ stir8 — выворачивание, corners, jamwhy, thinfit, wsyntax) зел�
   и уменьшает картинку усреднением по площади до 1600 по длинной стороне, как браузер;
   macOS-программа `sips` больше не нужна. Результаты те же: фото — 20 пересечений, det 245;
   «гитара» — 20, det 1, и её копия 800 px — тоже.
+- **Хэши bench.js зависят от версии Node (2026-09-15).** Пробная облачная сессия (Node
+  v22.22.2) получила trefoil 348751188, rand30 1089954128, rand60 −1041345001 вместо эталона
+  Air (Node v26.8.1). Физика та же: v3.7, v3.8, v3.9 и путь NOWASM=1 дали в облаке одну и ту же
+  тройку, энергии и det совпали; расходятся последние биты Math.pow/exp/sin в разных V8.
+  Эталоны теперь в `test/bench.js` по главной версии Node, тест сам печатает `hashMatch`.
 
 - Папка: `/Users/balik/Library/CloudStorage/GoogleDrive-gbalik@gmail.com/My Drive/Programming/Claude/Knots/` (git, ветка main).
 - Репозиторий: https://github.com/VBalik/knot-editor (публичный).

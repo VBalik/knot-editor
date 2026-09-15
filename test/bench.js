@@ -2,7 +2,11 @@
 // мс/шаг, E после STEPS шагов, хэш траектории (координаты ×1e9) — оптимизация обязана сохранять хэш
 // (точная эквивалентность) или объяснять расхождение. FULL=1 — досчитать до покоя (шаги, время, E, det).
 // STEPS=1500 FULL=0 KNOTS=trefoil,rand30,rand60 node harness.js bench.js   (KNOT_PAGE=… — другой файл; NOWASM=1 — JS-путь ядра пар, 3.2)
-(async ()=>{ const H=global.__H; window.__noAutoSave=true; const out={}; if(process.env.NOWASM) window.__noWasm=true;
+// ЭТАЛОН ЗАВИСИТ ОТ ВЕРСИИ NODE: Math.pow/exp/sin и т. п. в разных V8 расходятся в последних битах, за 1500 шагов хэш траектории другой при той же физике
+// (проверено облачной сессией 2026-09-15: v3.7, v3.8, v3.9 и NOWASM=1 на Node 22 дают одну и ту же тройку). Эталоны — по главной версии Node, только для STEPS=1500.
+(async ()=>{ const REF_HASH={ 26:{trefoil:-1541363460, rand30:-286394620, rand60:1614448689},   // MacBook Air, Node v26.8.1
+                   22:{trefoil:348751188, rand30:1089954128, rand60:-1041345001} };   // облако Claude Code, Node v22.22.2
+  const H=global.__H; window.__noAutoSave=true; const out={}; if(process.env.NOWASM) window.__noWasm=true;
   out.wasm0=window.__wasm? window.__wasm() : null;
   const STEPS=+(process.env.STEPS||1500), FULL=+(process.env.FULL||0), KNOTS=(process.env.KNOTS||'trefoil,rand30,rand60').split(',');
   function seeded(seed, fn){ const orig=Math.random; let sd=seed; Math.random=()=>{ sd=(Math.imul(sd,1103515245)+12345)&0x7fffffff; return sd/0x7fffffff; }; try{ return fn(); } finally{ Math.random=orig; } }
@@ -19,5 +23,10 @@
       if(FULL && o.running){ const t1=Date.now(); let s2=st; while(s2<200000){ o=H.step(200); s2+=200; if(!o.running) break; } r.full={steps:s2, sec:+((Date.now()-t1+ms)/1000).toFixed(1), settled:!o.running, E:+_ePrev.toPrecision(7), det:_detRobust(3), status:H.dbg().status.slice(0,80)}; }
       return r; });
     out[name]=rec; console.error(name, JSON.stringify(rec)); }
+  { const major=+process.versions.node.split('.')[0], ref=STEPS===1500? REF_HASH[major] : null;
+    out.node=process.version;
+    if(ref){ const bad=KNOTS.filter(k=>ref[k]!==undefined && out[k] && out[k].hash!==ref[k]); out.hashMatch=bad.length===0; if(bad.length) out.hashMismatch=bad.map(k=>({knot:k, expected:ref[k], got:out[k].hash})); }
+    else out.hashMatch=null;   // для этой версии Node или STEPS эталона нет: сравнивать только между версиями страницы на одной машине
+    console.error('node', process.version, 'hashMatch', out.hashMatch); }
   out.wasm=window.__wasm? window.__wasm() : null; console.error('wasm', JSON.stringify(out.wasm));   // 3.2: ok, проходы Wasm (used) и JS (js)
   return out; })()
