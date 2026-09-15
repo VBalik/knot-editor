@@ -1143,6 +1143,11 @@ stir8 — выворачивание, corners, jamwhy, thinfit, wsyntax) зел�
   Air (Node v26.8.1). Физика та же: v3.7, v3.8, v3.9 и путь NOWASM=1 дали в облаке одну и ту же
   тройку, энергии и det совпали; расходятся последние биты Math.pow/exp/sin в разных V8.
   Эталоны теперь в `test/bench.js` по главной версии Node, тест сам печатает `hashMatch`.
+- **Публикация на Netlify по решению пользователя (2026-09-15).** Сайт spring-knot.netlify.app
+  привязан к GitHub и публикует ветку `site`. Работа идёт в `v3`; пользователь проверяет её у
+  себя (`git pull` в папке Knots, `index.html`). По его просьбе `git push origin v3:site`
+  (только перемотка вперёд). Каждая продакшн-публикация Netlify тратит 15 кредитов; на
+  бесплатном тарифе 300 в месяц. Правила — в `CLAUDE.md`, раздел «Публикация и проверка».
 
 - Папка: `/Users/balik/Library/CloudStorage/GoogleDrive-gbalik@gmail.com/My Drive/Programming/Claude/Knots/` (git, ветка main).
 - Репозиторий: https://github.com/VBalik/knot-editor (публичный).
