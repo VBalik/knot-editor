@@ -47,4 +47,4 @@ function raster(o){
 function wobble(pts, amp, seed){ const R=rng(seed||11), modes=[]; for(let k=0;k<4;k++) modes.push({kx:(R()*2-1)*0.02, ky:(R()*2-1)*0.02, ph:R()*6.28, ax:(R()*2-1), ay:(R()*2-1)});
   const f=(x,y)=>{ let dx=0, dy=0; for(const m of modes){ const s=Math.sin(m.kx*x+m.ky*y+m.ph); dx+=m.ax*s; dy+=m.ay*s; } return {dx:dx*amp/2, dy:dy*amp/2}; };
   return {pts:pts.map(p=>{ const d=f(p.x,p.y); return {x:p.x+d.dx, y:p.y+d.dy}; }), field:f}; }
-module.exports={raster, wobble, arcTable, rng};
+module.exports={raster, wobble, arcTable, rng, coverage, blurBox, inSpans};   // 4.0: coverage/blurBox — генератору скетчей на бумаге (ikpaper.js)
