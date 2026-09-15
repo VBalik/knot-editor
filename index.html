@@ -218,15 +218,15 @@ button:hover{background:rgba(255,255,255,.09);border-color:rgba(62,224,210,.4);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 0 14px -5px var(--glow-teal)}
 button:active{transform:translateY(1px)}
 button:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(62,224,210,.25), 0 0 14px -5px var(--glow-teal)}
-/* Physics: green at rest, red pulse while computing, violet in Stir mode */
+/* Physics: green at rest, red pulse while computing, blue in Stir mode (3.9: same look as Physics) */
 button.go{background:linear-gradient(180deg,#63f2a5,#1fbd67);color:#03200f;
   border-color:rgba(74,222,128,.7);font-weight:700;letter-spacing:.3px;
   box-shadow:0 0 18px -4px var(--glow-green), inset 0 1px 0 rgba(255,255,255,.35)}
 button.go:hover{filter:brightness(1.07);border-color:rgba(120,240,170,.9);
   box-shadow:0 0 22px -3px rgba(74,222,128,.5), inset 0 1px 0 rgba(255,255,255,.4)}
-button.go.stir{background:linear-gradient(180deg,#ad9bff,#6c4cf0);color:#fff;border-color:rgba(160,140,255,.75);   /* same button in Stir mode */
-  box-shadow:0 0 18px -4px var(--glow-violet), inset 0 1px 0 rgba(255,255,255,.3)}
-button.go.stir:hover{box-shadow:0 0 22px -3px rgba(139,124,255,.5), inset 0 1px 0 rgba(255,255,255,.35)}
+button.go.stir{background:linear-gradient(180deg,#6cc4ff,#2186f0);color:#021a33;border-color:rgba(80,170,255,.75);   /* 3.9: Stir — та же кнопка, что Physics, но синяя */
+  box-shadow:0 0 18px -4px rgba(60,160,255,.45), inset 0 1px 0 rgba(255,255,255,.35)}
+button.go.stir:hover{border-color:rgba(130,200,255,.9);box-shadow:0 0 22px -3px rgba(60,160,255,.5), inset 0 1px 0 rgba(255,255,255,.4)}
 button.go.running{background:linear-gradient(180deg,#ff7590,#e01f4d);color:#fff;
   border-color:rgba(255,120,150,.8);
   box-shadow:0 0 16px -4px var(--glow-red), inset 0 1px 0 rgba(255,255,255,.25);
@@ -278,7 +278,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   <!-- ================= LEFT: 2D drawing ================= -->
   <div id="left" class="pane">
     <div class="topbar">
-      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.8</span></span>
+      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">3.9</span></span>
       <button id="restoreLast" title="Restore the last drawing from telemetry">Last</button><button id="clear" class="ghost">Clear</button>
       <span class="seg" id="presets" title="Example knots">
         <button class="ex" data-knot="trefoil" title="Trefoil 3₁">3₁</button>
@@ -502,13 +502,23 @@ function tryToggleCrossing(p){
   let c=null, bd=16;
   for(const cc of crossings){ const d=Math.hypot(cc.x-p.x,cc.y-p.y); if(d<bd){bd=d;c=cc;} }
   if(c){
-    c.over = c.over==='A'?'B':'A';
+    const wasPending=!!c.pending;
+    if(wasPending) c.pending=false;        // 3.9: первый клик по белому кружку выбирает проход (показывается предложенный, кружок серый); следующие клики меняют проход
+    else c.over = c.over==='A'?'B':'A';
     if(running) stopPhysics('');          // смена прохода = новая исходная форма
     updateKnotType();                      // тип узла мог поменяться
     renderDraw();
     syncKnot3D();                          // 3D-узел обновляется сразу
-    setStatus(isUnknot ? 'unknot → will become a circle' : 'crossing flipped — press ▶ Physics');
+    const k=pendingCount();
+    setStatus(k>0 ? 'over/under set · '+k+' white circle'+(k===1?'':'s')+' left: click to choose, click again to flip'
+      : (wasPending? 'all crossings set · ' : '')+(isUnknot ? 'unknot → will become a circle' : (wasPending? 'det '+knotDet+' — press ▶ Physics' : 'crossing flipped — press ▶ Physics')));
   }
+}
+function pendingCount(){ let k=0; if(closedCurve) for(const c of crossings) if(c.pending) k++; return k; }   // 3.9: пересечения с невыбранным проходом (белые кружки)
+function updatePlayGate(){   // 3.9: пока не выбраны все проходы, Physics недоступна (кнопка тусклая, подсказка во всплывающей надписи)
+  try{ if(typeof window!=='undefined' && window.__isWorker) return; const b=document.getElementById('play'); if(!b || running || _par || _stir) return;
+    const k=pendingCount(); if(b.dataset && b.dataset.t0===undefined) b.dataset.t0=b.title||'';
+    b.disabled=k>0; b.title=k>0? 'Choose over or under at every white circle first ('+k+' left)' : ((b.dataset && b.dataset.t0!==undefined)? b.dataset.t0 : b.title); }catch(e){}
 }
 function updateCrossInfo(){
   document.getElementById('crossInfo').innerHTML='×<b>'+crossings.length+'</b>';
@@ -588,19 +598,20 @@ function renderDraw(){
     dctx.save();
     dctx.globalCompositeOperation='destination-out';
     dctx.lineCap='butt'; dctx.lineWidth=CURVE_W+3;
-    for(const c of crossings){ const sUnder = c.over==='A'?c.sB:c.sA; strokeSpanOn(sUnder,GAP); }
+    for(const c of crossings){ if(c.pending) continue; const sUnder = c.over==='A'?c.sB:c.sA; strokeSpanOn(sUnder,GAP); }   // 3.9: у невыбранного прохода обе пряди сплошные
     dctx.restore();
     // проход 2 — поверх рисуем верхние пряди (сплошные)
     dctx.strokeStyle=grad; dctx.lineCap='round'; dctx.lineWidth=CURVE_W;
-    for(const c of crossings){ const sOver = c.over==='A'?c.sA:c.sB; strokeSpanOn(sOver,OVER); }
+    for(const c of crossings){ if(c.pending) continue; const sOver = c.over==='A'?c.sA:c.sB; strokeSpanOn(sOver,OVER); }
     // проход 3 — кольца-хендлы (кликните, чтобы поменять проход)
     for(const c of crossings){
       dctx.beginPath(); dctx.arc(c.x,c.y,CROSS_R,0,7);
-      dctx.fillStyle=T.ringFill; dctx.fill();
-      dctx.strokeStyle=T.ring; dctx.lineWidth=1.5; dctx.stroke();
+      dctx.fillStyle=c.pending? T.ringPendFill : T.ringFill; dctx.fill();   // 3.9: белый кружок — проход ещё не выбран; серый — выбран
+      dctx.strokeStyle=c.pending? T.ringPend : T.ring; dctx.lineWidth=c.pending? 2 : 1.5; dctx.stroke();
     }
   }
   dctx.setTransform(DPR,0,0,DPR,0,0);
+  updatePlayGate();
 }
 function getCSS(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
 // ТЕМА ХОЛСТОВ (2.17): цвета 2D-рисунка и 3D-сцены задаёт стиль страницы через CSS-переменные
@@ -609,7 +620,7 @@ let _theme=null;
 function theme(){ if(_theme) return _theme; const g=(v,d)=>{ let x=''; try{ x=getCSS(v); }catch(e){} return (x && x!=='#88aabb')? x : d; };
   _theme={dot:g('--draw-dot','rgba(148,168,196,.08)'), a:g('--draw-stroke-a','#8fd9ff'), b:g('--draw-stroke-b','#5ad1c7'), open:g('--draw-open','#9fb3c8'),
     start:g('--draw-start','rgba(127,215,255,.6)'), startFill:g('--draw-start-fill','rgba(127,215,255,.07)'), near:g('--draw-near','#4ade80'), nearFill:g('--draw-near-fill','rgba(74,222,128,.16)'),
-    ring:g('--draw-ring','rgba(160,175,195,.6)'), ringFill:g('--draw-ring-fill','rgba(148,163,184,.08)'),
+    ring:g('--draw-ring','rgba(160,175,195,.6)'), ringFill:g('--draw-ring-fill','rgba(148,163,184,.08)'), ringPend:g('--draw-ring-pending','rgba(255,255,255,.95)'), ringPendFill:g('--draw-ring-pending-fill','rgba(255,255,255,.22)'),
     glBg:g('--gl-bg','#0d1219'), glFloor:g('--gl-floor','#10151c'), glGrid1:g('--gl-grid1','#233043'), glGrid2:g('--gl-grid2','#182230')};
   return _theme; }
 
@@ -1071,7 +1082,7 @@ function ikRecognize(img){   // → {ok, msg, pts (рабочие px), recs (п�
 function ikFail(why, hint){   // 3.5: не удалось — стандартное окно сообщений (showError; подсказка о виде картинки — только в окне) + короткая строка статуса
   showError('Could not load a knot from the picture: '+why+'.', hint? 'The picture should show one closed line with a gap in the lower strand at every crossing.' : '');
 }
-function ikApply(res){   // распознанное → редактор: кривая, над/под (из разрывов; без разрыва — чередование), статус. 3.6: без подложки — пиксели картинки (пятна, контуры штрихов) в скетч не переносятся
+function ikApply(res){   // распознанное → редактор: кривая, над/под (из разрывов; без разрыва — выбор пользователя: белый кружок, 3.9), статус. 3.6: без подложки — пиксели картинки (пятна, контуры штрихов) в скетч не переносятся
   if(!res || !res.ok){ ikFail((res && res.msg)||'not recognised', true); return {ok:false, msg:res && res.msg}; }
   document.getElementById('clear').onclick();
   let minx=1e9, maxx=-1e9, miny=1e9, maxy=-1e9; for(const p of res.pts){ if(p.x<minx)minx=p.x; if(p.x>maxx)maxx=p.x; if(p.y<miny)miny=p.y; if(p.y>maxy)maxy=p.y; }
@@ -1096,15 +1107,15 @@ function ikApply(res){   // распознанное → редактор: кр�
     let o=true; for(const v of vis){ if(o) alt.set(v.ci, v.side); else if(!alt.has(v.ci)) alt.set(v.ci, v.side==='A'?'B':'A'); o=!o; }
     let agree=0, dis=0; crossings.forEach((c,ci)=>{ if(!c._ikKnown) return; if(alt.get(ci)===c.over) agree++; else dis++; });
     const flip=dis>agree; for(const c of rest){ const v=alt.get(crossings.indexOf(c)); c.over=flip? (v==='A'?'B':'A') : v; } }
+  for(const c of rest) c.pending=true;   // 3.9: разрыва на картинке нет — проход выбирает пользователь (белый кружок); чередование — только предложение, оно появится после клика
   for(const c of crossings){ delete c._ikFix; delete c._ikKnown; }
   updateKnotType(); updateCrossInfo();
   renderDraw(); syncKnot3D();
   const nc=crossings.length, alt=rest.length, nt=res.notes||{};
-  setStatus('image: '+nc+' crossing'+(nc===1?'':'s')+' · '+(isUnknot?'unknot':'det '+knotDet)
-    +(alt? ' · ⚠ '+alt+' without a visible gap — set alternating, click to flip' : '')
+  setStatus('image: '+nc+' crossing'+(nc===1?'':'s')+' · '+(alt? alt+' without a visible gap: click the white circles to choose over or under' : (isUnknot?'unknot':'det '+knotDet))
     +(nt.comps>1? ' · ⚠ '+nt.comps+' separate curves (a link?) — loaded the longest' : '')
-    +(nt.open? ' · ⚠ open ends joined' : '')+' · press ▶ Physics');
-  return {ok:true, nc, known, alt, bigon, det:knotDet, k, ox, oy};
+    +(nt.open? ' · ⚠ open ends joined' : '')+(alt? '' : ' · press ▶ Physics'));
+  return {ok:true, nc, known, alt, pending:alt, bigon, det:knotDet, k, ox, oy};
 }
 async function ikLoadFile(file){   // файл (кнопка Image, перетаскивание, вставка) → ImageData ≤1600 px → распознавание → редактор
   if(!file) return;
@@ -2802,7 +2813,7 @@ function stirRemapLift(seed){   // выворачивание S0 в отдель
 function stirCancel(){ _stirS0=null; _stirHoles=[]; _stirN0=0; _inflStart=0; _stirPins=null; _pinsFresh=false; _pinPos=null; _pinMob=null; _stirPending=null; physChgCancel(); if(!_stir) return; _stir=null; _stirX0=null; const p=document.getElementById('play'); if(p){ p.disabled=false; p.textContent='▶ Physics'; p.classList.remove('stir'); } _playStir=false; }
 let _playStir=false;        // единая кнопка: после финала серии «▶ Physics» становится «Stir»
 function stirEnable(on){ const b=document.getElementById('play'); if(!b) return; _playStir=!!on;
-  if(on){ b.textContent='Stir'; b.classList.add('stir'); b.classList.remove('running'); b.disabled=false; }
+  if(on){ b.textContent='▶ Stir'; b.classList.add('stir'); b.classList.remove('running'); b.disabled=false; }
   else { b.classList.remove('stir'); if(!running && !_stir) b.textContent='▶ Physics'; } }
 function knotRadius(){ if(!verts.length) return 0; let cx=0,cy=0,cz=0; for(const v of verts){ cx+=v.x; cy+=v.y; cz+=v.z; } cx/=N; cy/=N; cz/=N;
   let R=0; for(const v of verts) R=Math.max(R, Math.hypot(v.x-cx, v.y-cy, v.z-cz)); return R; }
@@ -4560,6 +4571,7 @@ function pillIdle(){ const p=document.getElementById('statusPill'); if(p && p.cl
    ЧАСТЬ E — UI-СВЯЗКА
    ========================================================================== */
 document.getElementById('play').onclick=()=>{
+  if(!running && !_par && !_stir && pendingCount()>0){ const k=pendingCount(); setStatus('choose over or under at '+k+' white circle'+(k===1?'':'s')+' first: click each one'); updatePlayGate(); return; }   // 3.9: без выбранных проходов физика не запускается
   if(_physChgT){ if(running || _par || _stir) physSettingsChanged(); else physChgCancel(); }   // отложенную смену ползунков применить до паузы, а не выбросить
   if(_stir) return;
   if(_par){ parCancel(false); return; }
@@ -4846,7 +4858,7 @@ window.__knotSetVerts=(arr)=>{ if(!arr||arr.length<8) return false; _liftFromDia
   N=verts.length; allocBuffers(); resampleEqualArc(); recenter();
   rebuildTube(); fitCamera(false); return {N,L0:+L0.toFixed(5)}; };
 // ВЕРСИЯ ИНТЕРФЕЙСА: X задаёт пользователь, Y растёт на 1 с каждой новой сборкой
-const APP_VER_MAJOR=3, APP_VER_MINOR=8;   // 3.8 (2026-09-15): распознавание рисунка пером с двойным следом — «линза» и параллельная шпора в скелете, стык разрывов пера, без «ослабленных» мостов через весь рисунок, строгий второй проход для оставшихся концов   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
+const APP_VER_MAJOR=3, APP_VER_MINOR=9;   // 3.9 (2026-09-15): пересечения картинки без видимого разрыва — белые кружки (проход не выбран), Physics недоступна до выбора всех; кнопка Stir — как Physics, но синяя   // 3.8 (2026-09-15): распознавание рисунка пером с двойным следом — «линза» и параллельная шпора в скелете, стык разрывов пера, без «ослабленных» мостов через весь рисунок, строгий второй проход для оставшихся концов   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
 const APP_VERSION=APP_VER_MAJOR+'.'+APP_VER_MINOR;   // 3.0, 3.1, … (с 3.0 без дополнения нулём)
 window.__buildTag='v'+APP_VERSION;
 { const el=document.getElementById('appVer'); if(el) el.textContent=APP_VERSION; }
