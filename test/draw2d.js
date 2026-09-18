@@ -2,6 +2,8 @@
 // Запуск: KNOT_CANVAS=canvas2d.js node harness.js draw2d.js
 //   KNOT=trefoil|figure8|cinquefoil|septafoil — пресет; KNOT=rN — randomKnot(N) с фиксированным зерном (SEED);
 //   KNOT=open — незамкнутая кривая под пером (виден пунктирный стартовый кружок с тенью)
+//   KNOT=img IK_IMG=<файл> — диаграмма, распознанная с картинки (тот же путь, что кнопка Upload): рисунок от руки со всеми его дрожаниями
+//   FLIP=<n,m,…> — после загрузки переключить проход у пересечений с этими номерами (проверка артефактов после клика)
 //   OUT=<файл.png> (по умолчанию out/draw2d.png), SCALE=1..4 — суперсэмплинг (DPR), BG=<цвет фона страницы>
 (async ()=>{ const fs=__require('fs'), path=__require('path'), H=global.__H;
   const mod=(n)=>__require(path.join(process.cwd(),'node_modules',n));
@@ -22,7 +24,21 @@
   else if(m){ const R=Math.random; let s=((Math.imul(seed,1103515245)+12345)&0x7fffffff)|1;   // randomKnot берёт зерно из Math.random — подменяем на время вызова
     Math.random=()=>{ s=(Math.imul(s,1103515245)+12345)&0x7fffffff; return s/0x80000000; };
     try{ randomKnot(+m[1]); } finally { Math.random=R; } }
+  else if(/^img$/i.test(kn)){ const src=process.env.IK_IMG; if(!src) throw new Error('KNOT=img требует IK_IMG=<файл>');
+    const buf=fs.readFileSync(src); let img;
+    if(/\.jpe?g$/i.test(src)){ const j=mod('jpeg-js').decode(buf,{useTArray:true, formatAsRGBA:true, maxMemoryUsageInMB:1024}); img={width:j.width, height:j.height, data:j.data}; }
+    else { const pn=mod('pngjs').PNG.sync.read(buf); img={width:pn.width, height:pn.height, data:pn.data}; }
+    const w0=img.width, h0=img.height, k=Math.min(1,1600/Math.max(w0,h0));   // как ikLoadFile: длинная сторона ≤1600
+    if(k<1){ const W1=Math.round(w0*k), H1=Math.round(h0*k), d=new Uint8ClampedArray(W1*H1*4), fx=w0/W1, fy=h0/H1;
+      for(let y=0;y<H1;y++){ const ya=y*fy, yb=(y+1)*fy, y0=Math.floor(ya), y1=Math.min(h0,Math.ceil(yb));
+        for(let x=0;x<W1;x++){ const xa=x*fx, xb=(x+1)*fx, x0=Math.floor(xa), x1=Math.min(w0,Math.ceil(xb)); let r=0,g=0,b=0,a=0,sw=0;
+          for(let yy=y0;yy<y1;yy++){ const wy=Math.min(yy+1,yb)-Math.max(yy,ya); if(wy<=0) continue;
+            for(let xx=x0;xx<x1;xx++){ const wx=Math.min(xx+1,xb)-Math.max(xx,xa); if(wx<=0) continue; const ww=wx*wy, kk=4*(yy*w0+xx); r+=img.data[kk]*ww; g+=img.data[kk+1]*ww; b+=img.data[kk+2]*ww; a+=img.data[kk+3]*ww; sw+=ww; } }
+          const o=4*(y*W1+x); d[o]=r/sw; d[o+1]=g/sw; d[o+2]=b/sw; d[o+3]=a/sw; } }
+      img={width:W1, height:H1, data:d}; }
+    ikApply(ikRecognize(img)); }
   else H.clickPreset(kn);
+  if(process.env.FLIP) for(const n of process.env.FLIP.split(',')){ const c=crossings[(+n|0)%Math.max(1,crossings.length)]; if(c){ c.over=c.over==='A'?'B':'A'; c.pending=false; } }
   renderDraw();
 
   // холст прозрачный: кладём его на фон страницы (#draw{background:…var(--bg2)})
