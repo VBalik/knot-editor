@@ -39,6 +39,7 @@
     ikApply(ikRecognize(img)); }
   else H.clickPreset(kn);
   // DRAG=доля,dx,dy — взять верёвочку в этой доле длины и оттащить на (dx,dy): вид после редактирования
+  if(process.env.RIGID) _dragS=(Math.min(10,Math.max(1,+process.env.RIGID))-1)/9;   // жёсткость верёвочки под рукой, 1..10
   if(process.env.DRAG){ const [f,dx,dy]=process.env.DRAG.split(',').map(Number);
     const q=smooth[Math.floor(smooth.length*(f||0.25))%smooth.length], sx=q.x*_v2.s+_v2.tx, sy=q.y*_v2.s+_v2.ty, N=20;
     H.pointer('pointermove', sx, sy); H.pointer('pointerdown', sx, sy);

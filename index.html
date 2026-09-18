@@ -283,7 +283,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   <!-- ================= LEFT: 2D drawing ================= -->
   <div id="left" class="pane">
     <div class="topbar">
-      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">4.4</span></span>
+      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">4.5</span></span>
       <button id="restoreLast" title="Restore the last drawing from telemetry">Last</button><button id="clear" class="ghost">Clear</button>
       <span class="seg" id="presets" title="Example knots">
         <button class="ex" data-knot="trefoil" title="Trefoil 3₁">3₁</button>
@@ -296,6 +296,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
       <span class="buildTag" id="buildTag" title="Build version"></span>
       <span class="chip" id="crossInfo" title="Number of diagram crossings">×<b>0</b></span>
       <span class="chip" id="knotType" title="Diagram determinant: 1 — unknot (will straighten into a circle)">type <b>—</b></span>
+      <span class="chip" title="Rigidity of the rope while you drag it by hand, 1–10: the higher, the wider and smoother the bend; at 1 the rope gives way right under your hand">Rigid. <input type="range" id="dragStiff" min="1" max="10" step="1" value="5"><b id="dragStiffVal">5</b></span>
       <span class="tspacer"></span>
       <span class="hint" id="hint">Drag the mouse and return to the start · click a crossing to flip over/under</span>
     </div>
@@ -395,11 +396,22 @@ function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
    пересчитываются на ходу, выбранные проходы переносятся по дуговым позициям;
    пересечение, родившееся при перетаскивании, становится «невыбранным» (белый кружок).
    ========================================================================== */
-const DRAG_R=55;        // радиус захвата ПО ДУГЕ (px диаграммы): сколько верёвочки идёт за рукой
+// 4.5: рука тянет верёвочку КОЛОКОЛОМ Гаусса: под рукой смещение точно равно ходу мышки, дальше плавно
+// сходит на нет. Ширина колокола и сопротивление излому — от ползунка «Rigid.»: жёсткая верёвочка не
+// переламывается под рукой, а ведёт за собой длинный пологий изгиб
+const DRAG_SIG=22;      // σ колокола (px дуги) при жёсткости 1
+const DRAG_SIG_K=78;    // прибавка к σ при жёсткости 10
+const DRAG_CUT=2.6;     // колокол обрезаем на DRAG_CUT·σ (там он уже ~3 % и ноль по краю)
+const DRAG_MOB_IN=2.2;  // в σ: докуда верёвочка полностью свободна…
+const DRAG_MOB_OUT=5.5; // …и где она уже почти неподвижна
+const DRAG_MOB_FL=0.08; // остаточная подвижность вдали: ноль намертво держал бы кольцо и верёвка тянулась,
+                        // а так натяжение расходится по длинному дальнему куску и там видно почти ничего
 const DRAG_ITER=16;     // прогонок проекции длин за один шаг (чётные — вперёд, нечётные — назад)
 const DRAG_DAMP=0.55;   // вязкость: доля прошлого смещения, переносимая дальше
-const DRAG_BEND=0.10;   // упругость на изгиб (лёгкое сглаживание)
-let _kd=null;           // текущий захват: {i, rest, w, prev, last, moved, acc}
+let _dragS=(5-1)/9;     // жёсткость 1..10 -> 0..1 (значение ползунка по умолчанию — 5)
+function _dragBendK(){ return 0.05+0.15*_dragS; }        // сила выпрямления за один проход
+function _dragBendIt(){ return 1+Math.round(8*_dragS); } // и сколько проходов: жёстче — изгиб глаже и шире
+let _kd=null;           // текущий захват: {i, rest, w, mob, prev, last, moved, acc}
 function _kdGrabR(){ return Math.max(14, 3*CURVE_W/Math.max(0.15,_v2.s)); }   // на сколько близко надо подвести руку к верёвочке
 function _kdNear(p){ let bi=-1, bd=Infinity; for(let i=0;i<smooth.length;i++){ const d=Math.hypot(smooth[i].x-p.x, smooth[i].y-p.y); if(d<bd){ bd=d; bi=i; } } return {i:bi, d:bd}; }
 function _recumLen(){ const n=smooth.length; cumLen=[0]; totalLen2D=0;   // длины по текущей кривой (buildSmooth пересобирает из raw, а при перетаскивании raw не трогаем)
@@ -419,25 +431,42 @@ function _kdKeep(snap, r){   // перенести выбранные прохо
     else c.pending=true; }   // пересечение родилось при перетаскивании: о проходе ничего не известно
 }
 function _kdStart(p, i){
-  const n=smooth.length, rest=new Float64Array(n), w=new Float32Array(n), R=Math.min(DRAG_R, 0.35*totalLen2D);
+  const n=smooth.length, rest=new Float64Array(n), w=new Float32Array(n), mob=new Float32Array(n);
+  // σ ограничиваем так, чтобы неподвижная зона (DRAG_MOB_OUT·σ) умещалась в полукольце: иначе «далеко» на узле нет
+  const sig=Math.min(DRAG_SIG+DRAG_SIG_K*_dragS, totalLen2D/(2*DRAG_MOB_OUT));
   for(let k=0;k<n;k++){ const a=smooth[k], b=smooth[(k+1)%n]; rest[k]=Math.hypot(b.x-a.x, b.y-a.y); }
-  for(let k=0;k<n;k++){ const t=arcDist2D(cumLen[i], cumLen[k])/R; const c=t>=1? 0 : Math.cos(1.5707963*t); w[k]=c*c; }
-  _kd={i, rest, w, prev:smooth.map(q=>({x:q.x,y:q.y})), last:{x:p.x,y:p.y}, moved:false, acc:0};
+  const e0=Math.exp(-0.5*DRAG_CUT*DRAG_CUT);
+  for(let k=0;k<n;k++){ const t=arcDist2D(cumLen[i], cumLen[k])/sig;
+    w[k]= t>=DRAG_CUT? 0 : (Math.exp(-0.5*t*t)-e0)/(1-e0);           // колокол: 1 под рукой, 0 на краю — без ступеньки
+    // подвижность: за DRAG_MOB_OUT·σ точки закреплены намертво, и натяжение кольца туда не уходит.
+    // Полоса подвижного гораздо шире колокола — иначе взятому куску неоткуда взять слабину и верёвка тянется
+    const u=(t-DRAG_MOB_IN)/(DRAG_MOB_OUT-DRAG_MOB_IN), c=Math.cos(1.5707963*u);
+    mob[k]= u<=0? 1 : DRAG_MOB_FL+(1-DRAG_MOB_FL)*(u>=1? 0 : c*c);
+    if(mob[k]<w[k]) mob[k]=w[k]; }
+  _kd={i, rest, w, mob, prev:smooth.map(q=>({x:q.x,y:q.y})), last:{x:p.x,y:p.y}, moved:false, acc:0};
 }
 function _kdStep(pull){
-  const n=smooth.length, K=_kd;
-  for(let k=0;k<n;k++){ const q=smooth[k], pv=K.prev[k], vx=(q.x-pv.x)*DRAG_DAMP, vy=(q.y-pv.y)*DRAG_DAMP;   // вязкость
+  const n=smooth.length, K=_kd, mob=K.mob;
+  for(let k=0;k<n;k++){ const q=smooth[k], pv=K.prev[k], m=mob[k],                                          // вязкость (неподвижные точки просто помним)
+        vx=(q.x-pv.x)*DRAG_DAMP*m, vy=(q.y-pv.y)*DRAG_DAMP*m;
     pv.x=q.x; pv.y=q.y; q.x+=vx; q.y+=vy; }
-  if(pull) for(let k=0;k<n;k++){ const w=K.w[k]; if(w>0){ smooth[k].x+=pull.x*w; smooth[k].y+=pull.y*w; } }
-  for(let k=0;k<n;k++){ const a=smooth[(k-1+n)%n], b=smooth[k], c=smooth[(k+1)%n];                          // упругость на изгиб
-    b.x+=DRAG_BEND*((a.x+c.x)/2-b.x); b.y+=DRAG_BEND*((a.y+c.y)/2-b.y); }
+  // рука: смещение точки = ход мышки × вес колокола. Множитель (1-DRAG_DAMP) — нормировка вязкости:
+  // без неё перенос прошлого смещения складывался с новым и при ровном ходе руки верёвочка разгонялась
+  // до 1/(1-DRAG_DAMP) ≈ 2,2 хода мышки (и растягивалась, потому что за рукой было не угнаться)
+  if(pull) for(let k=0;k<n;k++){ const w=K.w[k]*(1-DRAG_DAMP); if(w>0){ smooth[k].x+=pull.x*w; smooth[k].y+=pull.y*w; } }
+  const bk=_dragBendK(), bit=_dragBendIt();                                                                 // жёсткость на изгиб: несколько проходов выпрямления
+  for(let t=0;t<bit;t++) for(let k=0;k<n;k++){ const m=mob[k]<=DRAG_MOB_FL? 0 : mob[k]; if(m<=0) continue;
+    const a=smooth[(k-1+n)%n], b=smooth[k], c=smooth[(k+1)%n];
+    b.x+=bk*m*((a.x+c.x)/2-b.x); b.y+=bk*m*((a.y+c.y)/2-b.y); }
   // нерастяжимость: прогонка Гаусса-Зейделя ПО ОЧЕРЕДИ вперёд и назад. Внутри одной прогонки поправка
-  // передаётся соседу сразу, поэтому пара «вперёд-назад» разносит натяжение по всему кольцу, а не на
-  // DRAG_ITER точек, как при одностороннем обходе (с ним верёвка удлинялась на 15 %)
+  // передаётся соседу сразу, поэтому пара «вперёд-назад» разносит натяжение по всему подвижному куску, а не на
+  // DRAG_ITER точек, как при одностороннем обходе (с ним верёвка удлинялась на 15 %).
+  // Поправку делим по подвижности: у закреплённой точки она нулевая, и дальше по кольцу натяжение не идёт
   for(let it=0; it<DRAG_ITER; it++){ const back=it&1;
-    for(let j=0;j<n;j++){ const k=back? n-1-j : j, a=smooth[k], b=smooth[(k+1)%n];
-      let dx=b.x-a.x, dy=b.y-a.y; const L=Math.hypot(dx,dy)||1e-9, f=0.5*(L-K.rest[k])/L; dx*=f; dy*=f;
-      a.x+=dx; a.y+=dy; b.x-=dx; b.y-=dy; }
+    for(let j=0;j<n;j++){ const k=back? n-1-j : j, k2=(k+1)%n, a=smooth[k], b=smooth[k2];
+      const ma=mob[k], mb=mob[k2], ms=ma+mb; if(ms<1e-6) continue;
+      let dx=b.x-a.x, dy=b.y-a.y; const L=Math.hypot(dx,dy)||1e-9, f=(L-K.rest[k])/L; dx*=f; dy*=f;
+      a.x+=dx*ma/ms; a.y+=dy*ma/ms; b.x-=dx*mb/ms; b.y-=dy*mb/ms; }
     if(pull){ const q=smooth[K.i]; q.x=K.last.x; q.y=K.last.y; } }   // рука держит взятую точку: закрепление после каждой прогонки — это её краевое условие
 }
 function _kdMove(p){
@@ -634,6 +663,54 @@ function arcSpanPts(s0, half, step){
 // обвести кусок кривой (осталось для совместимости: разрыв/верх идут вдоль настоящей кривой)
 function strokeSpanOn(s0,half){ _putFlat(arcSpanPts(s0,half),0,0,0,false); dctx.stroke(); }
 function _flatOf(pts){ const a=new Float64Array(2*pts.length); for(let i=0;i<pts.length;i++){ a[2*i]=pts[i].x; a[2*i+1]=pts[i].y; } return a; }
+// 4.5: отрезки по длине дуги (кольцо): объединение и вычитание. Нужны, чтобы КАЖДЫЙ кусок верёвочки
+// рисовался ровно один раз: полупрозрачные слои (тень, блик, притенение), наложенные второй раз,
+// давали на плотном узле «чешую» из капсул, а кусок соседнего пересечения мог ещё и затянуть чужой разрыв
+function _arcMerge(list, total){
+  const seg=[];
+  for(const it of list){ if(it.b-it.a>=total) return [{a:0, b:total}];
+    let a=it.a%total, b=it.b%total; if(a<0) a+=total; if(b<0) b+=total;
+    if(a<=b) seg.push({a, b}); else { seg.push({a, b:total}); seg.push({a:0, b}); } }
+  seg.sort((p,q)=>p.a-q.a);
+  const out=[];
+  for(const x of seg){ const last=out[out.length-1];
+    if(last && x.a<=last.b+1e-9){ if(x.b>last.b) last.b=x.b; } else out.push({a:x.a, b:x.b}); }
+  if(out.length>1 && out[0].a<=1e-9 && out[out.length-1].b>=total-1e-9){   // кусок через ноль — один отрезок, иначе на стыке шов
+    const first=out.shift(); out[out.length-1].b += first.b; }
+  return out;
+}
+function _arcSub(A, B){
+  let out=[];
+  for(const a of A){ let cur=[{a:a.a, b:a.b}];
+    for(const b of B){ const nx=[];
+      for(const c of cur){ if(b.b<=c.a || b.a>=c.b){ nx.push(c); continue; }
+        if(b.a>c.a) nx.push({a:c.a, b:b.a});
+        if(b.b<c.b) nx.push({a:b.b, b:c.b}); }
+      cur=nx; if(!cur.length) break; }
+    out=out.concat(cur); }
+  return out;
+}
+// 4.5: кольцо минус дырки -> куски. Кусок через ноль остаётся ОДНИМ (иначе на стыке s=0 виден шов)
+function _arcPieces(holes, total){
+  if(!holes.length) return null;
+  const out=_arcSub([{a:0, b:total}], holes);
+  if(out.length>1 && out[0].a<=1e-9 && out[out.length-1].b>=total-1e-9){
+    const first=out.shift(); out[out.length-1].b += first.b; }
+  return out;
+}
+function arcRangePts(a, b){   // кусок кривой от дуги a до дуги b — ПО ТЕМ ЖЕ точкам smooth, что и основная кривая
+  // (пересэмплирование с другим шагом слегка срезает углы, и дорисованный кусок ложился на кривую со ступенькой),
+  // концы — точные точки по дуге
+  const n=smooth.length, len=b-a; if(!(len>0) || n<2) return new Float64Array(0);
+  const A=((a%totalLen2D)+totalLen2D)%totalLen2D, out=[];
+  let lo=0, hi=n-1; while(lo<hi){ const m=(lo+hi)>>1; if(cumLen[m]<=A) lo=m+1; else hi=m; }
+  let k=(cumLen[lo]<=A)? 0 : lo, acc=cumLen[k]-A; if(acc<0) acc+=totalLen2D;
+  const pa=arcPointOn(a); out.push(pa.x, pa.y);
+  for(let g=0; acc<len-1e-9 && g<2*n; g++){ out.push(smooth[k].x, smooth[k].y);
+    const nk=(k+1)%n; acc+=(nk===0? totalLen2D : cumLen[nk])-cumLen[k]; k=nk; }
+  const pb=arcPointOn(b); out.push(pb.x, pb.y);
+  return Float64Array.from(out);
+}
 // 4.3: путь по плоскому массиву координат. off — смещение по НОРМАЛИ к кривой (блик и притенение идут вдоль верёвочки
 // и не рассыпаются в бусины на дрожащем рисунке от руки, как смещение в одну сторону экрана), dx/dy — сдвиг по экрану
 // (тень на бумаге; она в разы шире сдвига, поэтому выглядит мягкой копией, а не бусинами). Сдвиг применяем к ТОЧКАМ:
@@ -658,7 +735,7 @@ function _putFlat(a, off, dx, dy, closed, lit){
 // поэтому ни один слой не вылезает за силуэт даже на крутых поворотах
 function _ropeStack(put, W, grad, T, rich){
   dctx.lineJoin='round'; dctx.lineCap='round';
-  if(rich){ dctx.strokeStyle=T.ropeShadow;                                     // тень на бумаге: три мягкие полосы вместо дорогого shadowBlur
+  if(rich){ dctx.strokeStyle=T.ropeShadow;                                     // тень на бумаге: мягкие полосы вместо дорогого shadowBlur
     put(0, 0.60*W*LIT_X, 0.60*W*LIT_Y); dctx.globalAlpha=0.10; dctx.lineWidth=2.15*W; dctx.stroke();
     put(0, 0.53*W*LIT_X, 0.53*W*LIT_Y); dctx.globalAlpha=0.11; dctx.lineWidth=1.62*W; dctx.stroke();
     put(0, 0.43*W*LIT_X, 0.43*W*LIT_Y); dctx.globalAlpha=0.13; dctx.lineWidth=1.18*W; dctx.stroke();
@@ -689,12 +766,49 @@ function renderDraw(){
   if(path.length>1){ let a=1e9,b=1e9,c=-1e9,d=-1e9; for(const p of path){ if(p.x<a)a=p.x; if(p.y<b)b=p.y; if(p.x>c)c=p.x; if(p.y>d)d=p.y; } gx0=a; gy0=b; gx1=c; gy1=d; }
   const grad=dctx.createLinearGradient(gx0,gy0,gx1,gy1);
   grad.addColorStop(0,T.a); grad.addColorStop(1,T.b);
+  // 4.5: пересечение — как настоящая верёвка поверх верёвки. Разрыв НЕ выстригаем из готового рисунка
+  // и не дорисовываем верхнюю прядь поверх: дважды положенные полупрозрачные слои давали на верёвочке
+  // «чешую», а ровные торцы стирания и дорисовки — тонкие волоски на стыке. Вместо этого РЕЖЕМ саму кривую:
+  // из кольца длины дуги вычитаем куски нижних прядей, и каждый кусок рисуется ровно один раз
+  const gap=0.55*W, cut=[], marks=[];
+  if(closedCurve && crossings.length) for(const c of crossings){
+    if(c.pending) continue;                                              // 3.9: у невыбранного прохода обе пряди сплошные
+    const sU=c.over==='A'? c.sB : c.sA;
+    const sn=Math.abs(c.dirA.x*c.dirB.y - c.dirA.y*c.dirB.x);            // |sin| угла между прядями: на пологом пересечении прятать надо длиннее
+    const hu=Math.min(6*W, (0.5*W+gap)/Math.max(0.30,sn));               // половина разрыва ПО НИЖНЕЙ пряди
+    cut.push({a:sU-hu, b:sU+hu});
+    // 4.3: контактная тень — КОРОТКАЯ отметина на срезе нижней пряди с теневой стороны. Полоса вдоль всей
+    // верхней пряди мазала соседние пряди, проходящие рядом: на плотном рисунке это читалось как грязные штрихи
+    for(const sg of [-1,1]){ const p0=arcPointOn(sU+sg*hu), p1=arcPointOn(sU+sg*(hu+1.35*W));
+      if((p0.x-c.x)*LIT_X+(p0.y-c.y)*LIT_Y>0)                            // срез с теневой стороны: на него и падает тень верхней верёвочки
+        marks.push({a:sg>0? arcRangePts(sU+hu, sU+hu+1.35*W) : arcRangePts(sU-hu-1.35*W, sU-hu), p0, p1}); }
+  }
+  const pieces = closedCurve? _arcPieces(_arcMerge(cut, totalLen2D), totalLen2D) : null;
+  // кольца-хендлы выбранных пересечений — ПОД верёвочкой: видны в разрыве, на самой верёвочке не мусорят
+  if(pieces) for(const c of crossings){ if(c.pending) continue;
+    dctx.beginPath(); dctx.arc(c.x,c.y,CROSS_RV*px,0,7);
+    dctx.strokeStyle=T.ring; dctx.lineWidth=px; dctx.stroke(); }
   // линия
   if(path.length>1){
-    const flat=_flatOf(path);
-    if(closedCurve) _ropeStack((off,dx,dy,lit)=>_putFlat(flat,off,dx,dy,true,lit), W, grad, T, rich);
-    else { dctx.lineWidth=3*px; dctx.lineJoin='round'; dctx.lineCap='round'; dctx.strokeStyle=T.open; _putFlat(flat,0,0,0,false); dctx.stroke(); }
+    if(!closedCurve){ const flat=_flatOf(path);
+      dctx.lineWidth=3*px; dctx.lineJoin='round'; dctx.lineCap='round'; dctx.strokeStyle=T.open; _putFlat(flat,0,0,0,false); dctx.stroke(); }
+    else if(!pieces){ const flat=_flatOf(path);
+      _ropeStack((off,dx,dy,lit)=>_putFlat(flat,off,dx,dy,true,lit), W, grad, T, rich); }
+    else for(const r of pieces){ if(r.b-r.a < 0.3*W) continue;
+      const pts=arcRangePts(r.a, r.b);
+      _ropeStack((off,dx,dy,lit)=>_putFlat(pts,off,dx,dy,false,lit), W, grad, T, rich); }
   }
+  if(rich && marks.length){ dctx.save(); dctx.globalCompositeOperation='source-atop';   // отметина ложится ТОЛЬКО на уже нарисованное, то есть на саму нижнюю прядь
+    dctx.globalAlpha=0.62; dctx.lineCap='butt'; dctx.lineWidth=1.05*W;
+    for(const m of marks){ const g=dctx.createLinearGradient(m.p0.x,m.p0.y,m.p1.x,m.p1.y);   // затухание вдоль отметины: у среза плотно, дальше в ноль
+      g.addColorStop(0,T.ropeShadow); g.addColorStop(1,'rgba(0,0,0,0)');
+      dctx.strokeStyle=g; _putFlat(m.a,0,0,0,false); dctx.stroke(); }
+    dctx.restore(); }
+  // белые кружки невыбранных проходов — ПОВЕРХ: на сплошных прядях их иначе не видно
+  if(closedCurve) for(const c of crossings){ if(!c.pending) continue;
+    dctx.beginPath(); dctx.arc(c.x,c.y,CROSS_RV*px,0,7);
+    dctx.fillStyle=T.ringPendFill; dctx.fill();
+    dctx.strokeStyle=T.ringPend; dctx.lineWidth=2*px; dctx.stroke(); }
   if(startPt && !closedCurve){
     const near = drawing && raw.length>20 && dist(raw[raw.length-1],startPt)<START_R;
     dctx.save();
@@ -706,41 +820,6 @@ function renderDraw(){
     dctx.shadowBlur = near ? 14 : 7;
     dctx.beginPath(); dctx.arc(startPt.x,startPt.y,START_R,0,7); dctx.fill(); dctx.stroke();
     dctx.restore();
-  }
-  // 4.2: пересечение — как настоящая верёвка поверх верёвки. Полосу вырезаем ВДОЛЬ ВЕРХНЕЙ пряди, поэтому
-  // края разрыва идут параллельно ей при любом угле (раньше резали поперёк нижней, и на пологом пересечении
-  // торец выглядел откушенным). Потом верхняя прядь кладёт контактную тень на срезы нижней — по ней глаз
-  // мгновенно видит, кто сверху, — и рисуется целиком той же стопкой слоёв
-  if(closedCurve && crossings.length){
-    const gap=0.55*W, st=Math.max(1.5,2*px), spans=[], marks=[];
-    for(const c of crossings){ if(c.pending) continue;   // 3.9: у невыбранного прохода обе пряди сплошные
-      const s0=c.over==='A'? c.sA : c.sB, sU=c.over==='A'? c.sB : c.sA;
-      const sn=Math.abs(c.dirA.x*c.dirB.y - c.dirA.y*c.dirB.x);            // |sin| угла между прядями: на пологом пересечении резать надо длиннее
-      const half=Math.min(5*W, (0.5*W+gap)/Math.max(0.30,sn) + 0.9*W);
-      spans.push({cut:arcSpanPts(s0,half,st), draw:arcSpanPts(s0,half+1.6*W,st)});
-      // 4.3: контактная тень — КОРОТКАЯ отметина на срезе нижней пряди с теневой стороны. Прежняя полоса вдоль всей
-      // верхней пряди мазала соседние пряди, проходящие рядом: на плотном рисунке это читалось как грязные штрихи
-      const hu=Math.min(6*W, (0.5*W+gap)/Math.max(0.30,sn));               // половина длины разрыва ПО НИЖНЕЙ пряди
-      for(const sg of [-1,1]){ const p0=arcPointOn(sU+sg*hu), p1=arcPointOn(sU+sg*(hu+1.35*W));
-        if((p0.x-c.x)*LIT_X+(p0.y-c.y)*LIT_Y>0)                             // срез с теневой стороны: на него и падает тень верхней верёвочки
-          marks.push({a:arcSpanPts(sU+sg*(hu+0.675*W), 0.675*W, st), p0, p1}); }
-    }
-    dctx.save(); dctx.globalCompositeOperation='destination-out';           // 1 — стираем полосу под верхней прядью
-    dctx.lineCap='round'; dctx.lineJoin='round'; dctx.strokeStyle='#000'; dctx.lineWidth=W+2*gap;
-    for(const sp of spans){ _putFlat(sp.cut,0,0,0,false); dctx.stroke(); }
-    dctx.restore();
-    if(rich && marks.length){ dctx.save(); dctx.globalCompositeOperation='source-atop';   // 2 — отметина ложится ТОЛЬКО на уже нарисованное, то есть на саму нижнюю прядь
-      dctx.globalAlpha=0.62; dctx.lineCap='butt'; dctx.lineWidth=1.05*W;
-      for(const m of marks){ const g=dctx.createLinearGradient(m.p0.x,m.p0.y,m.p1.x,m.p1.y);   // затухание вдоль отметины: у среза плотно, дальше в ноль
-        g.addColorStop(0,T.ropeShadow); g.addColorStop(1,'rgba(0,0,0,0)');
-        dctx.strokeStyle=g; _putFlat(m.a,0,0,0,false); dctx.stroke(); }
-      dctx.restore(); }
-    for(const c of crossings){   // 3 — кольца-хендлы: после стирания (иначе полоса выкусывала из них куски) и ПОД верхней прядью
-      dctx.beginPath(); dctx.arc(c.x,c.y,CROSS_RV*px,0,7);
-      if(c.pending){ dctx.fillStyle=T.ringPendFill; dctx.fill(); }   // 3.9: белый кружок — проход ещё не выбран; у выбранного заливки нет, она мутнила бумагу под верёвочкой
-      dctx.strokeStyle=c.pending? T.ringPend : T.ring; dctx.lineWidth=(c.pending? 2 : 1)*px; dctx.stroke();
-    }
-    for(const sp of spans) _ropeStack((off,dx,dy,lit)=>_putFlat(sp.draw,off,dx,dy,false,lit), W, grad, T, rich);   // 4 — верхняя прядь целиком
   }
   dctx.setTransform(DPR,0,0,DPR,0,0);
   updatePlayGate();
@@ -4886,6 +4965,12 @@ tightChk.onchange=()=>{ _tightToggle=!!tightChk.checked;
 repCoefEl.oninput =()=>{ repCoef=+repCoefEl.value;  document.getElementById('repVal').textContent=repCoefEl.value;
   if(!tightOn()) physSettingsChangedSoon();   // в «плотно» дальнее отталкивание выключено — перезапуск ни к чему
   logSliderEvent('rep'); };
+// ползунок жёсткости верёвочки под рукой (только 2D-редактирование, физику не трогает)
+try{ const dsEl=document.getElementById('dragStiff');
+  dsEl.oninput=()=>{ _dragS=(Math.min(10,Math.max(1,+dsEl.value||5))-1)/9;
+    document.getElementById('dragStiffVal').textContent=dsEl.value; };
+  _dragS=(Math.min(10,Math.max(1,+dsEl.value||5))-1)/9;
+}catch(e){}
 thick.oninput=()=>{ thickCoef=+thick.value; document.getElementById('thickVal').textContent=thick.value; updateGeomUnits(); rebuildTube(); physSettingsChangedSoon(); logSliderEvent('thick'); };   // главная трубка — сразу новой толщины (и когда показана выбранная попытка: _thickFit — её); окна попыток — своей; счёт не запускается (2.40)
 // выбор цвета трубки упразднён: окраска — карта напряжения (кривизны), см. rebuildTube
 
@@ -5064,7 +5149,7 @@ window.__knotSetVerts=(arr)=>{ if(!arr||arr.length<8) return false; _liftFromDia
   N=verts.length; allocBuffers(); resampleEqualArc(); recenter();
   rebuildTube(); fitCamera(false); return {N,L0:+L0.toFixed(5)}; };
 // ВЕРСИЯ ИНТЕРФЕЙСА: X задаёт пользователь, Y растёт на 1 с каждой новой сборкой
-const APP_VER_MAJOR=4, APP_VER_MINOR=4;   // 4.4 (2026-09-18): разрыв и кольцо у пересечения стали мелкими — «кто сверху» держится на тени верхней пряди; замкнутая диаграмма сразу в режиме редактирования: курсор-ладошка, узел берут рукой и тянут как верёвку (нерастяжимо, с упругостью и вязкостью), пересечения и выбранные проходы едут следом   // 4.3 (2026-09-18): верёвочка без «чешуи» — блик и притенение смещаются по НОРМАЛИ к кривой со стороны света, а не в одну сторону экрана; контактная тень — короткая отметина с затуханием на срезе нижней пряди, а не полоса вдоль всей верхней (она мазала соседние пряди тёмными штрихами); свивка убрана   // 4.2 (2026-09-18): картинку можно бросить прямо в поле 2D (кнопка Image переименована в Upload); линия в 2D — тонкая верёвочка: тень на бумаге, тёмная оплётка, светотень и блик, редкая свивка; пересечение режется ВДОЛЬ верхней пряди, и она кладёт контактную тень на срезы нижней   // 4.1 (2026-09-18): второй уровень порога включается только тогда, когда маска первого уровня не похожа на рисунок линией (мало чернил, короткая суммарная линия) — на фото с неровной чернильностью штриха бледные участки больше не теряются; зерно убирается медианой 3×3, а не средним (среднее затягивало узкие разрывы)   // 4.0 (2026-09-15): распознавание скетчей на бумаге — порог по второму уровню Оцу (у штриха есть тёмное ядро, у клетки, зерна и пятен нет), фон без сдвига у края кадра (рамка в морфологии, зеркало в сглаживании), чернильность по сглаженному 3×3 кадру, «упор» нижней пряди — по настоящему разрыву в маске, слияние вытянутого X при любом угле, мост длиннее привычного разрыва запрещён   // 3.9 (2026-09-15): пересечения картинки без видимого разрыва — белые кружки (проход не выбран), Physics недоступна до выбора всех; кнопка Stir — как Physics, но синяя   // 3.8 (2026-09-15): распознавание рисунка пером с двойным следом — «линза» и параллельная шпора в скелете, стык разрывов пера, без «ослабленных» мостов через весь рисунок, строгий второй проход для оставшихся концов   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
+const APP_VER_MAJOR=4, APP_VER_MINOR=5;   // 4.5 (2026-09-18): верёвочка в 2D без «чешуи» и швов — разрыв у пересечения не выстригается из готового рисунка, а РЕЖЕТСЯ сама кривая: каждый кусок рисуется ровно один раз (дважды положенные полупрозрачные слои давали чешую, ровные торцы дорисовки — тёмные волоски); рука тянет узел колоколом Гаусса (под рукой ход равен ходу мышки, вдали почти ноль) с ползунком жёсткости Rigid. 1–10   // 4.4 (2026-09-18): разрыв и кольцо у пересечения стали мелкими — «кто сверху» держится на тени верхней пряди; замкнутая диаграмма сразу в режиме редактирования: курсор-ладошка, узел берут рукой и тянут как верёвку (нерастяжимо, с упругостью и вязкостью), пересечения и выбранные проходы едут следом   // 4.3 (2026-09-18): верёвочка без «чешуи» — блик и притенение смещаются по НОРМАЛИ к кривой со стороны света, а не в одну сторону экрана; контактная тень — короткая отметина с затуханием на срезе нижней пряди, а не полоса вдоль всей верхней (она мазала соседние пряди тёмными штрихами); свивка убрана   // 4.2 (2026-09-18): картинку можно бросить прямо в поле 2D (кнопка Image переименована в Upload); линия в 2D — тонкая верёвочка: тень на бумаге, тёмная оплётка, светотень и блик, редкая свивка; пересечение режется ВДОЛЬ верхней пряди, и она кладёт контактную тень на срезы нижней   // 4.1 (2026-09-18): второй уровень порога включается только тогда, когда маска первого уровня не похожа на рисунок линией (мало чернил, короткая суммарная линия) — на фото с неровной чернильностью штриха бледные участки больше не теряются; зерно убирается медианой 3×3, а не средним (среднее затягивало узкие разрывы)   // 4.0 (2026-09-15): распознавание скетчей на бумаге — порог по второму уровню Оцу (у штриха есть тёмное ядро, у клетки, зерна и пятен нет), фон без сдвига у края кадра (рамка в морфологии, зеркало в сглаживании), чернильность по сглаженному 3×3 кадру, «упор» нижней пряди — по настоящему разрыву в маске, слияние вытянутого X при любом угле, мост длиннее привычного разрыва запрещён   // 3.9 (2026-09-15): пересечения картинки без видимого разрыва — белые кружки (проход не выбран), Physics недоступна до выбора всех; кнопка Stir — как Physics, но синяя   // 3.8 (2026-09-15): распознавание рисунка пером с двойным следом — «линза» и параллельная шпора в скелете, стык разрывов пера, без «ослабленных» мостов через весь рисунок, строгий второй проход для оставшихся концов   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
 const APP_VERSION=APP_VER_MAJOR+'.'+APP_VER_MINOR;   // 3.0, 3.1, … (с 3.0 без дополнения нулём)
 window.__buildTag='v'+APP_VERSION;
 { const el=document.getElementById('appVer'); if(el) el.textContent=APP_VERSION; }
