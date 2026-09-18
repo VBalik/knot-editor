@@ -107,7 +107,11 @@ function makeCanvas(width, height, el){
         const m1=0.5+(ex*u1x+ey*u1y), m2=0.5-(ex*u2x+ey*u2y); if(m1<=0||m2<=0) continue;
         put(row+px, (c>1?1:c)*(m1>1?1:m1)*(m2>1?1:m2)); } }
   }
-  function covSeg(x0,y0,x1,y1,hw,butt){        // отрезок штриха: butt — ровный торец, иначе круглый
+  // 4.7: cap0/cap1 — ставить ли РОВНЫЙ торец на этом конце. У внутренних стыков ломаной торца быть не должно:
+  // сглаживание края даёт там 0.5 покрытия с каждой стороны, а объединение берёт максимум, не сумму, —
+  // и на каждой вершине проступала тёмная чёрточка поперёк линии (в браузере торцы только на концах пути)
+  function covSeg(x0,y0,x1,y1,hw,butt,cap0,cap1){   // отрезок штриха: butt — ровный торец, иначе круглый
+    if(cap0===undefined) cap0=true; if(cap1===undefined) cap1=true;
     const dx=x1-x0, dy=y1-y0, L2=dx*dx+dy*dy;
     if(L2<1e-12){ if(!butt) covDisc(x0,y0,hw); return; }
     const L=Math.sqrt(L2), R=hw+0.5;
@@ -118,7 +122,10 @@ function makeCanvas(width, height, el){
     for(let py=py0;py<=py1;py++){ const cy=py+0.5, row=py*W;
       for(let px=px0;px<=px1;px++){ const cx=px+0.5, ex=cx-x0, ey=cy-y0; let c;
         if(butt){ const s=ex*ux+ey*uy, perp=Math.abs(ex*(-uy)+ey*ux);
-          const cp=R-perp; if(cp<=0) continue; const ca=Math.min(s, L-s)+0.5; if(ca<=0) continue;
+          const cp=R-perp; if(cp<=0) continue;
+          // без торца отрезок продлеваем совсем немного — только чтобы сглаженные края соседей сомкнулись.
+          // Продление на всю полуширину делало наружную сторону поворота гранёной
+          const ca=Math.min(cap0? s+0.5 : s+1.25, cap1? (L-s)+0.5 : (L-s)+1.25); if(ca<=0) continue;
           c=(cp>1?1:cp)*(ca>1?1:ca);
         } else { let t=(ex*dx+ey*dy)/L2; t=t<0?0:(t>1?1:t);
           const d=Math.hypot(cx-(x0+t*dx), cy-(y0+t*dy)); c=R-d; if(c<=0) continue; if(c>1) c=1; }
@@ -192,7 +199,11 @@ function makeCanvas(width, height, el){
       const seam = (sp.closed || (sp.p.length>=6 && Math.abs(sp.p[0]-sp.p[sp.p.length-2])<1e-6 && Math.abs(sp.p[1]-sp.p[sp.p.length-1])<1e-6)) && st.lineDash.length===0;
       for(const part of dashSplit(sp.p, sp.closed)){
         const P=part.p, n=P.length/2|0;
-        for(let i=0;i+1<n;i++) covSeg(P[2*i], P[2*i+1], P[2*i+2], P[2*i+3], hw, butt);
+        const ring=!!part.closed;   // у замкнутого подпути торцов нет вовсе: всюду стыки
+        for(let i=0;i+1<n;i++) covSeg(P[2*i], P[2*i+1], P[2*i+2], P[2*i+3], hw, butt, !ring&&i===0, !ring&&i+2===n);
+        // замыкающий отрезок подпути: раньше его не рисовали вовсе — с круглыми торцами дыру закрывали
+        // соседние «капсулы», с ровными она была бы видна
+        if(ring && n>2) covSeg(P[2*n-2], P[2*n-1], P[0], P[1], hw, butt, false, false);
         if(!butt) continue;
         for(let i=1;i+1<n;i++) covJoin(P[2*i], P[2*i+1], P[2*i-2], P[2*i-1], P[2*i+2], P[2*i+3], hw);
         if(seam && n>2) covJoin(P[0], P[1], P[2*n-4], P[2*n-3], P[2], P[3], hw);   // шов замкнутого подпути
