@@ -1,7 +1,10 @@
 # Отчёт эксперимента: закон жёсткого ядра + 1/Δ⁴, 100 случайных узлов, серии A (w=1,r=1) и B (w=2,r=2)
 import json, glob, math, html, sys, os
 sys.path.insert(0, os.path.dirname(__file__))
-SC='/private/tmp/claude-501/-Users-balik-Library-CloudStorage-GoogleDrive-gbalik-gmail-com-My-Drive-Programming-Claude-Knots/f39e4efd-2d05-4d5a-a62c-5a632f4d1e27/scratchpad'
+import sys, os
+# каталог с данными прогона: аргумент командной строки, переменная RK_DIR или текущая папка
+# (раньше здесь был зашит путь к scratchpad давно закрытой сессии на Mac — в облаке скрипт просто падал)
+SC=(sys.argv[1] if len(sys.argv)>1 else os.environ.get('RK_DIR') or os.getcwd())
 OUT=sys.argv[1]
 def esc(x): return html.escape(str(x))
 def fmt(x,d=1): return (f'{x:.{d}f}').replace('.',',')

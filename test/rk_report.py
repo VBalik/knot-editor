@@ -1,6 +1,9 @@
 # Генератор отчёта «Сто случайных узлов» (HTML, инлайн-SVG)
 import json, glob, math, html, sys, statistics as st
-SC='/private/tmp/claude-501/-Users-balik-Library-CloudStorage-GoogleDrive-gbalik-gmail-com-My-Drive-Programming-Claude-Knots/f39e4efd-2d05-4d5a-a62c-5a632f4d1e27/scratchpad'
+import sys, os
+# каталог с данными прогона: аргумент командной строки, переменная RK_DIR или текущая папка
+# (раньше здесь был зашит путь к scratchpad давно закрытой сессии на Mac — в облаке скрипт просто падал)
+SC=(sys.argv[1] if len(sys.argv)>1 else os.environ.get('RK_DIR') or os.getcwd())
 RK=SC+'/rk'; RK2=SC+'/rk2'; OUT=sys.argv[1]
 C=json.load(open(RK2+'/campaign2.json')); R={r['i']:r for r in C['records']}; E2={e['i']:e for e in C['exact']}
 E1={e['i']:e for e in json.load(open(RK+'/exactdet.json'))}

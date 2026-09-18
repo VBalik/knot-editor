@@ -28,7 +28,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR/test\" && { test -d node_modules/three && test -d node_modules/jpeg-js && test -d node_modules/pngjs || npm ci --no-audit --no-fund; }"
+            "command": "cd \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/test\" || exit 0; node -e \"require('three');require('jpeg-js');require('pngjs')\" 2>/dev/null || npm ci --no-audit --no-fund",
+            "timeout": 300
           }
         ]
       }

@@ -3,9 +3,11 @@ node_modules/
 *.log
 .claude/settings.local.json
 knot-telemetry*.json
+telemetry/
 
 # рабочие выходы стенда и посторонние папки (не для публичного репозитория)
 test/out/
+/out/
 *.out
 *.cpuprofile
 test/err*.txt
@@ -15,3 +17,11 @@ test/wf_*.js
 test/wasm/knots.json
 publish/
 publish.zip
+
+# мусор macOS и Google Drive: рабочая копия у пользователя лежит в синхронизируемой папке
+._*
+.Spotlight-V100
+.fseventsd
+.TemporaryItems
+.tmp.drive*
+*conflicted copy*
