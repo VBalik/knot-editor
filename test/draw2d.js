@@ -38,6 +38,12 @@
       img={width:W1, height:H1, data:d}; }
     ikApply(ikRecognize(img)); }
   else H.clickPreset(kn);
+  // DRAG=доля,dx,dy — взять верёвочку в этой доле длины и оттащить на (dx,dy): вид после редактирования
+  if(process.env.DRAG){ const [f,dx,dy]=process.env.DRAG.split(',').map(Number);
+    const q=smooth[Math.floor(smooth.length*(f||0.25))%smooth.length], sx=q.x*_v2.s+_v2.tx, sy=q.y*_v2.s+_v2.ty, N=20;
+    H.pointer('pointermove', sx, sy); H.pointer('pointerdown', sx, sy);
+    for(let k=1;k<=N;k++) H.pointer('pointermove', sx+(dx||0)*k/N, sy+(dy||0)*k/N);
+    H.pointer('pointerup', sx+(dx||0), sy+(dy||0)); }
   if(process.env.FLIP) for(const n of process.env.FLIP.split(',')){ const c=crossings[(+n|0)%Math.max(1,crossings.length)]; if(c){ c.over=c.over==='A'?'B':'A'; c.pending=false; } }
   renderDraw();
 
