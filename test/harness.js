@@ -25,6 +25,10 @@ function makeCtx2d(){
     { get:(t,k)=> (k in t)? t[k] : noop, set:()=>true });
 }
 
+// KNOT_CANVAS=canvas2d.js — настоящая растеризация 2D вместо no-op-прокси (см. test/canvas2d.js, test/draw2d.js).
+// Без переменной окружения всё как прежде: getContext отдаёт makeCtx2d().
+const REAL2D = process.env.KNOT_CANVAS ? require(path.resolve(__dirname, process.env.KNOT_CANVAS)) : null;
+
 const elements = new Map();
 function makeEl(id){
   const listeners = {};
@@ -43,7 +47,9 @@ function makeEl(id){
     getAttribute(k){ return this.attrs[k]; },
     setAttribute(k,v){ this.attrs[k]=v; },
     getBoundingClientRect:()=>({left:0, top:0, width:800, height:600, right:800, bottom:600}),
-    getContext:()=>makeCtx2d(),
+    getContext:(kind)=> (REAL2D && kind!=='webgl' && kind!=='webgl2' && kind!=='experimental-webgl')
+      ? (el.__ctx2d || (el.__ctx2d = REAL2D.makeCanvas(el.width||800, el.height||600, el)))   // один контекст на элемент: тест читает те же пиксели, что рисует страница
+      : makeCtx2d(),
     appendChild:()=>{}, remove:()=>{}, focus:()=>{},
     setPointerCapture(){ const e=new Error('NotFoundError: synthetic pointer'); e.name='NotFoundError'; throw e; },
     releasePointerCapture(){},

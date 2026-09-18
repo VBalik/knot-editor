@@ -269,6 +269,11 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.02), inset 0 0 70px -40px rgba(62,224,210,.18), 0 10px 30px -18px rgba(0,0,0,.9)}
 
 #left.imgDrop .stagewrap{outline:2px dashed rgba(62,224,210,.65);outline-offset:-8px;border-radius:var(--r-stage)}   /* 3.4: сюда можно бросить картинку узла */
+/* 4.2: пока файл тащат над полем 2D — надпись поверх холста, чтобы было видно, куда бросать */
+.dropHint{position:absolute;inset:0;z-index:4;display:none;align-items:center;justify-content:center;pointer-events:none;
+  font-weight:600;font-size:15px;letter-spacing:.4px;color:#cdf3ee;text-shadow:0 2px 12px rgba(0,0,0,.75);
+  background:radial-gradient(120% 90% at 50% 50%, rgba(62,224,210,.12), transparent 72%);border-radius:var(--r-stage)}
+#left.imgDrop .dropHint{display:flex}
 /* UI 2.01: left only Random/Clear, right without legend/OBJ/Telem */
 #restoreLast,#presets,#buildTag,#crossInfo,#knotType,#hint,#stressChip,#exportObj,#exportTelem{display:none !important}
 </style>
@@ -278,7 +283,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   <!-- ================= LEFT: 2D drawing ================= -->
   <div id="left" class="pane">
     <div class="topbar">
-      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">4.1</span></span>
+      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">4.2</span></span>
       <button id="restoreLast" title="Restore the last drawing from telemetry">Last</button><button id="clear" class="ghost">Clear</button>
       <span class="seg" id="presets" title="Example knots">
         <button class="ex" data-knot="trefoil" title="Trefoil 3₁">3₁</button>
@@ -287,15 +292,16 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
         <button class="ex" data-knot="septafoil" title="Septafoil 7₁">7₁</button>
       </span>
       <span class="chip" title="Random diagram with the given number of crossings (over/under chosen at random); crossings are kept at least 1.5 marker radii apart"><button id="randKnot" class="ghost">Random</button><input id="randN" type="number" min="1" max="250" value="20" title="number of crossings, 1–250"></span>
-      <button id="imgLoad" class="ghost" title="Load a knot from a picture or sketch (PNG, JPEG…): strands with a gap at each under-crossing; crossings drawn without a gap get alternating over/under. You can also drop an image onto this pane or paste it (⌘V / Ctrl+V)">Image</button><input id="imgFile" type="file" accept="image/*" hidden>
+      <button id="imgLoad" class="ghost" title="Load a knot from a picture or sketch (PNG, JPEG…): strands with a gap at each under-crossing; crossings drawn without a gap get alternating over/under. You can also drag a picture straight onto the 2D field, or paste it (⌘V / Ctrl+V)">Upload</button><input id="imgFile" type="file" accept="image/*" hidden>
       <span class="buildTag" id="buildTag" title="Build version"></span>
       <span class="chip" id="crossInfo" title="Number of diagram crossings">×<b>0</b></span>
       <span class="chip" id="knotType" title="Diagram determinant: 1 — unknot (will straighten into a circle)">type <b>—</b></span>
       <span class="tspacer"></span>
       <span class="hint" id="hint">Drag the mouse and return to the start · click a crossing to flip over/under</span>
     </div>
-    <div class="stagewrap">
+    <div class="stagewrap" id="stage2d">
       <canvas id="draw"></canvas>
+      <div class="dropHint" id="dropHint">Drop a picture of a knot here</div>
       <div class="vignette"></div>
     </div>
   </div>
@@ -523,92 +529,122 @@ function updatePlayGate(){   // 3.9: пока не выбраны все про�
 function updateCrossInfo(){
   document.getElementById('crossInfo').innerHTML='×<b>'+crossings.length+'</b>';
 }
-const CURVE_W = 5;   // толщина пряди в 2D-диаграмме
+const CURVE_W = 4.4;      // 4.2: толщина верёвочки в ЭКРАННЫХ пикселях (была плоская линия 5 в координатах диаграммы)
+const LIT_X=0.55, LIT_Y=0.83;   // направление «в тень»: свет сверху-слева, как блик на панели
 
 // точка на сглаженной кривой по длине дуги s (циклически)
 function arcPointOn(s){
   const M=smooth.length; if(!M) return {x:0,y:0};
   s=((s%totalLen2D)+totalLen2D)%totalLen2D;
-  let i=0; while(i<M-1 && cumLen[i+1]<s) i++;
-  const a=cumLen[i], b=(i+1<M)?cumLen[i+1]:totalLen2D;
+  let lo=0, hi=M-1; while(lo<hi){ const mid=(lo+hi+1)>>1; if(cumLen[mid]<=s) lo=mid; else hi=mid-1; }   // 4.2: двоичный поиск (кусков за кадр стало много)
+  const i=lo, a=cumLen[i], b=(i+1<M)?cumLen[i+1]:totalLen2D;
   const t=(b-a>1e-6)?(s-a)/(b-a):0;
   const p0=smooth[i], p1=smooth[(i+1)%M];
   return {x:p0.x+(p1.x-p0.x)*t, y:p0.y+(p1.y-p0.y)*t};
 }
-// обвести кусок кривой [s0-half, s0+half] вдоль настоящей кривой (для разрыва/верха)
-function strokeSpanOn(s0,half){
-  const step=2; dctx.beginPath();
-  let first=true;
-  for(let s=-half;s<=half+1e-6;s+=step){
-    const p=arcPointOn(s0+s);
-    if(first){ dctx.moveTo(p.x,p.y); first=false; } else dctx.lineTo(p.x,p.y);
-  }
-  dctx.stroke();
+// точки куска кривой [s0-half, s0+half] вдоль настоящей кривой (считаем один раз на кадр, обводим несколько раз)
+function arcSpanPts(s0, half, step){
+  const st=step||2, n=Math.max(2, Math.ceil(2*half/st)+1), out=new Float64Array(2*n);
+  for(let i=0;i<n;i++){ const p=arcPointOn(s0-half+2*half*i/(n-1)); out[2*i]=p.x; out[2*i+1]=p.y; }
+  return out;
 }
-
-// фоновая точечная сетка — «миллиметровка» под рисунок
-function drawDotGrid(w,h){
-  const g=24;
-  dctx.fillStyle=theme().dot;
-  for(let y=g;y<h;y+=g) for(let x=g;x<w;x+=g) dctx.fillRect(x-0.6,y-0.6,1.2,1.2);
+// обвести кусок кривой (осталось для совместимости: разрыв/верх идут вдоль настоящей кривой)
+function strokeSpanOn(s0,half){ _putFlat(arcSpanPts(s0,half),0,0,false); dctx.stroke(); }
+// путь по плоскому массиву координат со сдвигом. Сдвиг применяем к ТОЧКАМ: путь canvas хранится уже преобразованным,
+// и translate после его построения ничего не двигает — только перо
+function _putFlat(a, dx, dy, closed){
+  dctx.beginPath(); dctx.moveTo(a[0]+dx, a[1]+dy);
+  for(let i=2;i<a.length;i+=2) dctx.lineTo(a[i]+dx, a[i+1]+dy);
+  if(closed) dctx.closePath();
+}
+function _putPts(pts, dx, dy, closed){
+  dctx.beginPath(); dctx.moveTo(pts[0].x+dx, pts[0].y+dy);
+  for(let i=1;i<pts.length;i++) dctx.lineTo(pts[i].x+dx, pts[i].y+dy);
+  if(closed) dctx.closePath();
+}
+// 4.2: верёвочка — стопка соосных обводок ОДНОГО пути: тень на бумаге, тёмная оплётка, тело с градиентом,
+// теневая и освещённая стороны, узкий блик. Тени рисуются смещёнными полосами, а не shadowBlur: размытие
+// длинного пути дорого в браузере и в стенде. Каждый слой уже полщины тела, смещение меньше полуширины —
+// поэтому ни один слой не вылезает за силуэт даже на крутых поворотах
+function _ropeStack(put, W, grad, T, rich){
+  const at=(k)=>put(k*W*LIT_X, k*W*LIT_Y);
+  dctx.lineJoin='round'; dctx.lineCap='round';
+  if(rich){ dctx.strokeStyle=T.ropeShadow;
+    at(0.60); dctx.globalAlpha=0.10; dctx.lineWidth=2.15*W; dctx.stroke();
+    at(0.53); dctx.globalAlpha=0.11; dctx.lineWidth=1.62*W; dctx.stroke();
+    at(0.43); dctx.globalAlpha=0.13; dctx.lineWidth=1.18*W; dctx.stroke();
+    dctx.globalAlpha=1; }
+  at(0);
+  dctx.strokeStyle=T.ropeRim; dctx.lineWidth=1.16*W; dctx.stroke();          // оплётка: тёмный край даёт силуэт, без него линия читается лентой
+  dctx.strokeStyle=grad;      dctx.lineWidth=W;      dctx.stroke();          // тело
+  if(rich){
+    dctx.strokeStyle=T.ropeShadow; dctx.globalAlpha=0.20; dctx.lineWidth=0.62*W; at(0.17);  dctx.stroke();   // теневая сторона цилиндра
+    dctx.strokeStyle=T.ropeSheen;  dctx.globalAlpha=0.13; dctx.lineWidth=0.66*W; at(-0.155); dctx.stroke();  // освещённая сторона
+    dctx.globalAlpha=0.32; dctx.lineWidth=0.26*W; at(-0.29); dctx.stroke();                                  // узкий блик
+    dctx.globalAlpha=0.13; dctx.lineWidth=0.50*W; dctx.setLineDash([0.55*W, 0.95*W]); dctx.lineCap='butt';    // свивка: шаг ≈ 1.5 диаметра, как у настоящей верёвки
+    at(-0.10); dctx.stroke(); dctx.setLineDash([]); dctx.lineCap='round';
+    dctx.globalAlpha=1; }
 }
 const CROSS_R=14;   // радиус кружка-маркера пересечения (пиксели холста)
 function _minCrossDist(){ let m=Infinity; for(let i=0;i<crossings.length;i++) for(let j=i+1;j<crossings.length;j++){ const d=Math.hypot(crossings[i].x-crossings[j].x, crossings[i].y-crossings[j].y); if(d<m) m=d; } return m; }
 function renderDraw(){
   const w=drawCv.clientWidth, h=drawCv.clientHeight;
   dctx.clearRect(0,0,w,h);
-  drawDotGrid(w,h);
   fitView(); dctx.setTransform(DPR*_v2.s,0,0,DPR*_v2.s,DPR*_v2.tx,DPR*_v2.ty);   // дальше — в координатах диаграммы
+  const T=theme(), sc=_v2.s||1, px=1/sc;
+  const Wpx=Math.max(2.6, Math.min(CURVE_W, CURVE_W*Math.pow(sc,0.35))), W=Wpx*px;   // при отдалении верёвочка худеет медленнее вида, но не тоньше 2.6 px
+  const rich=closedCurve && !drawing && Wpx>=3.2 && crossings.length<=120;           // плотный узел и мелкий масштаб — без светотени: там она превращается в грязь
   // стартовый кружок
   const startPt = smooth.length?smooth[0]:(raw.length?raw[0]:null);
-  // градиент вдоль холста: линия мягко переливается голубым → бирюзовым
-  const grad=dctx.createLinearGradient(0,0,w,h);
-  const T=theme(); grad.addColorStop(0,T.a); grad.addColorStop(1,T.b);
-  // линия
   const path = closedCurve ? smooth : raw;
+  // градиент вдоль САМОЙ диаграммы (а не холста): при отдалении цвет не уезжает
+  let gx0=0, gy0=0, gx1=w, gy1=h;
+  if(path.length>1){ let a=1e9,b=1e9,c=-1e9,d=-1e9; for(const p of path){ if(p.x<a)a=p.x; if(p.y<b)b=p.y; if(p.x>c)c=p.x; if(p.y>d)d=p.y; } gx0=a; gy0=b; gx1=c; gy1=d; }
+  const grad=dctx.createLinearGradient(gx0,gy0,gx1,gy1);
+  grad.addColorStop(0,T.a); grad.addColorStop(1,T.b);
+  // линия
   if(path.length>1){
-    dctx.lineWidth = closedCurve?CURVE_W:3; dctx.lineJoin='round'; dctx.lineCap='round';
-    dctx.strokeStyle = closedCurve ? grad : T.open;
-    dctx.beginPath();
-    dctx.moveTo(path[0].x,path[0].y);
-    for(let i=1;i<path.length;i++) dctx.lineTo(path[i].x,path[i].y);
-    if(closedCurve) dctx.closePath();
-    dctx.stroke();
+    if(closedCurve) _ropeStack((dx,dy)=>_putPts(path,dx,dy,true), W, grad, T, rich);
+    else { dctx.lineWidth=3*px; dctx.lineJoin='round'; dctx.lineCap='round'; dctx.strokeStyle=T.open; _putPts(path,0,0,false); dctx.stroke(); }
   }
   if(startPt && !closedCurve){
     const near = drawing && raw.length>20 && dist(raw[raw.length-1],startPt)<START_R;
     dctx.save();
     dctx.strokeStyle = near ? T.near : T.start;
     dctx.fillStyle   = near ? T.nearFill : T.startFill;
-    dctx.lineWidth=2;
-    if(!near) dctx.setLineDash([4,4]);
+    dctx.lineWidth=2*px;
+    if(!near) dctx.setLineDash([4*px,4*px]);
     dctx.shadowColor = near ? 'rgba(74,222,128,.6)' : 'rgba(127,215,255,.35)';
     dctx.shadowBlur = near ? 14 : 7;
     dctx.beginPath(); dctx.arc(startPt.x,startPt.y,START_R,0,7); dctx.fill(); dctx.stroke();
     dctx.restore();
   }
-  // пересечения — классический вид: нижняя прядь с чистым разрывом, верхняя сплошная.
-  // Разрыв и верхний сегмент идут ВДОЛЬ настоящей кривой → без ложных изломов.
+  // 4.2: пересечение — как настоящая верёвка поверх верёвки. Полосу вырезаем ВДОЛЬ ВЕРХНЕЙ пряди, поэтому
+  // края разрыва идут параллельно ей при любом угле (раньше резали поперёк нижней, и на пологом пересечении
+  // торец выглядел откушенным). Потом верхняя прядь кладёт контактную тень на срезы нижней — по ней глаз
+  // мгновенно видит, кто сверху, — и рисуется целиком той же стопкой слоёв
   if(closedCurve && crossings.length){
-    // классический стиль: разрыв ТУГО обнимает верхнюю прядь — зазор ~полширины
-    // линии с каждой стороны, торцы ровные (butt), всё глубоко внутри кольца r=14
-    const GAP=5.5;     // полудлина разрыва нижней пряди (по дуге, торец ровный)
-    const OVER=14;     // полудлина восстановления верхней пряди (перекрывает стирание)
-    // проход 1 — стираем нижние пряди всех пересечений (до прозрачного фона)
-    dctx.save();
-    dctx.globalCompositeOperation='destination-out';
-    dctx.lineCap='butt'; dctx.lineWidth=CURVE_W+3;
-    for(const c of crossings){ if(c.pending) continue; const sUnder = c.over==='A'?c.sB:c.sA; strokeSpanOn(sUnder,GAP); }   // 3.9: у невыбранного прохода обе пряди сплошные
-    dctx.restore();
-    // проход 2 — поверх рисуем верхние пряди (сплошные)
-    dctx.strokeStyle=grad; dctx.lineCap='round'; dctx.lineWidth=CURVE_W;
-    for(const c of crossings){ if(c.pending) continue; const sOver = c.over==='A'?c.sA:c.sB; strokeSpanOn(sOver,OVER); }
-    // проход 3 — кольца-хендлы (кликните, чтобы поменять проход)
-    for(const c of crossings){
-      dctx.beginPath(); dctx.arc(c.x,c.y,CROSS_R,0,7);
-      dctx.fillStyle=c.pending? T.ringPendFill : T.ringFill; dctx.fill();   // 3.9: белый кружок — проход ещё не выбран; серый — выбран
-      dctx.strokeStyle=c.pending? T.ringPend : T.ring; dctx.lineWidth=c.pending? 2 : 1.5; dctx.stroke();
+    const gap=0.95*W, spans=[];
+    for(const c of crossings){ if(c.pending) continue;   // 3.9: у невыбранного прохода обе пряди сплошные
+      const s0=c.over==='A'? c.sA : c.sB;
+      const sn=Math.abs(c.dirA.x*c.dirB.y - c.dirA.y*c.dirB.x);            // |sin| угла между прядями: на пологом пересечении резать надо длиннее
+      const half=Math.min(5*W, (0.5*W+gap)/Math.max(0.30,sn) + 0.9*W);
+      spans.push({cut:arcSpanPts(s0,half,Math.max(1.5,2*px)), draw:arcSpanPts(s0,half+1.6*W,Math.max(1.5,2*px))});
     }
+    dctx.save(); dctx.globalCompositeOperation='destination-out';           // 1 — стираем полосу под верхней прядью
+    dctx.lineCap='round'; dctx.lineJoin='round'; dctx.strokeStyle='#000'; dctx.lineWidth=W+2*gap;
+    for(const sp of spans){ _putFlat(sp.cut,0,0,false); dctx.stroke(); }
+    dctx.restore();
+    if(rich){ dctx.save(); dctx.globalCompositeOperation='source-atop';     // 2 — контактная тень ложится ТОЛЬКО на уже нарисованное, то есть на срезы нижней пряди
+      dctx.globalAlpha=0.55; dctx.strokeStyle=T.ropeShadow; dctx.lineCap='round'; dctx.lineWidth=W+2*gap;
+      for(const sp of spans){ _putFlat(sp.cut, 0.75*W*LIT_X, 0.75*W*LIT_Y, false); dctx.stroke(); }
+      dctx.restore(); }
+    for(const c of crossings){   // 3 — кольца-хендлы: после стирания (иначе полоса выкусывала из них куски) и ПОД верхней прядью
+      dctx.beginPath(); dctx.arc(c.x,c.y,CROSS_R,0,7);
+      if(c.pending){ dctx.fillStyle=T.ringPendFill; dctx.fill(); }   // 3.9: белый кружок — проход ещё не выбран; у выбранного заливки нет, она мутнила бумагу под верёвочкой
+      dctx.strokeStyle=c.pending? T.ringPend : T.ring; dctx.lineWidth=(c.pending? 2 : 1)*px; dctx.stroke();
+    }
+    for(const sp of spans) _ropeStack((dx,dy)=>_putFlat(sp.draw,dx,dy,false), W, grad, T, rich);   // 4 — верхняя прядь целиком
   }
   dctx.setTransform(DPR,0,0,DPR,0,0);
   updatePlayGate();
@@ -621,6 +657,8 @@ function theme(){ if(_theme) return _theme; const g=(v,d)=>{ let x=''; try{ x=ge
   _theme={dot:g('--draw-dot','rgba(148,168,196,.08)'), a:g('--draw-stroke-a','#8fd9ff'), b:g('--draw-stroke-b','#5ad1c7'), open:g('--draw-open','#9fb3c8'),
     start:g('--draw-start','rgba(127,215,255,.6)'), startFill:g('--draw-start-fill','rgba(127,215,255,.07)'), near:g('--draw-near','#4ade80'), nearFill:g('--draw-near-fill','rgba(74,222,128,.16)'),
     ring:g('--draw-ring','rgba(160,175,195,.6)'), ringFill:g('--draw-ring-fill','rgba(148,163,184,.08)'), ringPend:g('--draw-ring-pending','rgba(255,255,255,.95)'), ringPendFill:g('--draw-ring-pending-fill','rgba(255,255,255,.22)'),
+    ropeRim:g('--draw-rope-rim','#0a2733'), ropeSheen:g('--draw-rope-sheen','#eafcff'), ropeShadow:g('--draw-rope-shadow','#020610'),   // 4.2: оплётка, блик и тень верёвочки; прозрачность задаётся альфой слоёв, поэтому цвета непрозрачные
+
     glBg:g('--gl-bg','#0d1219'), glFloor:g('--gl-floor','#10151c'), glGrid1:g('--gl-grid1','#233043'), glGrid2:g('--gl-grid2','#182230')};
   return _theme; }
 
@@ -1197,14 +1235,23 @@ async function ikLoadFile(file){   // файл (кнопка Image, перета
   }catch(e){ ikFail((e && e.message)||String(e)); }
   finally{ URL.revokeObjectURL(url); }
 }
-if(typeof window!=='undefined' && !window.__isWorker){   // кнопка Image, перетаскивание файла на левую панель, вставка картинки из буфера (⌘V)
+if(typeof window!=='undefined' && !window.__isWorker){   // кнопка Upload, перетаскивание файла в поле 2D, вставка картинки из буфера (⌘V)
   const btn=document.getElementById('imgLoad'), inp=document.getElementById('imgFile');
   if(btn && inp){ btn.onclick=()=>{ try{ inp.value=''; }catch(e){} if(inp.click) inp.click(); }; inp.onchange=()=>{ const f=inp.files && inp.files[0]; if(f) ikLoadFile(f); }; }
-  const left=document.getElementById('left');
-  if(left && left.addEventListener){ const hasFile=(e)=>{ const t=e.dataTransfer && e.dataTransfer.types; return !!t && Array.prototype.indexOf.call(t, 'Files')>=0; };
-    left.addEventListener('dragover', e=>{ if(!hasFile(e)) return; e.preventDefault(); left.classList.add('imgDrop'); });
-    left.addEventListener('dragleave', e=>{ if(!e.relatedTarget || !left.contains(e.relatedTarget)) left.classList.remove('imgDrop'); });
-    left.addEventListener('drop', e=>{ if(!hasFile(e)) return; e.preventDefault(); left.classList.remove('imgDrop'); const fs=[...e.dataTransfer.files]; ikLoadFile(fs.find(x=>/^image\//.test(x.type)) || fs[0]); }); }
+  // 4.2: файл бросают прямо в поле 2D (холст и рамка вокруг него) — зона подсвечивается и подписывается; вся левая панель
+  // тоже принимает файл, как раньше. Счётчик входов/выходов вместо relatedTarget: при переходе на дочерний элемент
+  // (холст, виньетка) браузер шлёт dragleave, и подсветка иначе мигала бы
+  const left=document.getElementById('left'), hasFile=(e)=>{ const t=e.dataTransfer && e.dataTransfer.types; return !!t && Array.prototype.indexOf.call(t, 'Files')>=0; };
+  const takeDrop=(e)=>{ const fs=[...e.dataTransfer.files]; ikLoadFile(fs.find(x=>/^image\//.test(x.type)) || fs[0]); };
+  if(left && left.addEventListener){ let deep=0;
+    const lit=(on)=>{ try{ left.classList[on? 'add' : 'remove']('imgDrop'); }catch(e){} };
+    left.addEventListener('dragenter', e=>{ if(!hasFile(e)) return; e.preventDefault(); deep++; lit(true); });
+    left.addEventListener('dragover', e=>{ if(!hasFile(e)) return; e.preventDefault(); try{ e.dataTransfer.dropEffect='copy'; }catch(x){} lit(true); });
+    left.addEventListener('dragleave', e=>{ if(--deep<=0){ deep=0; lit(false); } });
+    left.addEventListener('drop', e=>{ if(!hasFile(e)) return; e.preventDefault(); deep=0; lit(false); takeDrop(e); }); }
+  // файл, брошенный мимо зоны (на 3D или на поля страницы), браузер иначе открыл бы вместо программы
+  if(window.addEventListener){ window.addEventListener('dragover', e=>{ if(hasFile(e)) e.preventDefault(); });
+    window.addEventListener('drop', e=>{ if(hasFile(e)) e.preventDefault(); }); }
   if(window.addEventListener) window.addEventListener('paste', e=>{ const it=e.clipboardData && e.clipboardData.items; if(!it) return;
     for(const x of it){ if(x.kind==='file' && /^image\//.test(x.type)){ const f=x.getAsFile(); if(f){ e.preventDefault(); ikLoadFile(f); } return; } } });
 }
@@ -4921,7 +4968,7 @@ window.__knotSetVerts=(arr)=>{ if(!arr||arr.length<8) return false; _liftFromDia
   N=verts.length; allocBuffers(); resampleEqualArc(); recenter();
   rebuildTube(); fitCamera(false); return {N,L0:+L0.toFixed(5)}; };
 // ВЕРСИЯ ИНТЕРФЕЙСА: X задаёт пользователь, Y растёт на 1 с каждой новой сборкой
-const APP_VER_MAJOR=4, APP_VER_MINOR=1;   // 4.1 (2026-09-18): второй уровень порога включается только тогда, когда маска первого уровня не похожа на рисунок линией (мало чернил, короткая суммарная линия) — на фото с неровной чернильностью штриха бледные участки больше не теряются; зерно убирается медианой 3×3, а не средним (среднее затягивало узкие разрывы)   // 4.0 (2026-09-15): распознавание скетчей на бумаге — порог по второму уровню Оцу (у штриха есть тёмное ядро, у клетки, зерна и пятен нет), фон без сдвига у края кадра (рамка в морфологии, зеркало в сглаживании), чернильность по сглаженному 3×3 кадру, «упор» нижней пряди — по настоящему разрыву в маске, слияние вытянутого X при любом угле, мост длиннее привычного разрыва запрещён   // 3.9 (2026-09-15): пересечения картинки без видимого разрыва — белые кружки (проход не выбран), Physics недоступна до выбора всех; кнопка Stir — как Physics, но синяя   // 3.8 (2026-09-15): распознавание рисунка пером с двойным следом — «линза» и параллельная шпора в скелете, стык разрывов пера, без «ослабленных» мостов через весь рисунок, строгий второй проход для оставшихся концов   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
+const APP_VER_MAJOR=4, APP_VER_MINOR=2;   // 4.2 (2026-09-18): картинку можно бросить прямо в поле 2D (кнопка Image переименована в Upload); линия в 2D — тонкая верёвочка: тень на бумаге, тёмная оплётка, светотень и блик, редкая свивка; пересечение режется ВДОЛЬ верхней пряди, и она кладёт контактную тень на срезы нижней   // 4.1 (2026-09-18): второй уровень порога включается только тогда, когда маска первого уровня не похожа на рисунок линией (мало чернил, короткая суммарная линия) — на фото с неровной чернильностью штриха бледные участки больше не теряются; зерно убирается медианой 3×3, а не средним (среднее затягивало узкие разрывы)   // 4.0 (2026-09-15): распознавание скетчей на бумаге — порог по второму уровню Оцу (у штриха есть тёмное ядро, у клетки, зерна и пятен нет), фон без сдвига у края кадра (рамка в морфологии, зеркало в сглаживании), чернильность по сглаженному 3×3 кадру, «упор» нижней пряди — по настоящему разрыву в маске, слияние вытянутого X при любом угле, мост длиннее привычного разрыва запрещён   // 3.9 (2026-09-15): пересечения картинки без видимого разрыва — белые кружки (проход не выбран), Physics недоступна до выбора всех; кнопка Stir — как Physics, но синяя   // 3.8 (2026-09-15): распознавание рисунка пером с двойным следом — «линза» и параллельная шпора в скелете, стык разрывов пера, без «ослабленных» мостов через весь рисунок, строгий второй проход для оставшихся концов   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
 const APP_VERSION=APP_VER_MAJOR+'.'+APP_VER_MINOR;   // 3.0, 3.1, … (с 3.0 без дополнения нулём)
 window.__buildTag='v'+APP_VERSION;
 { const el=document.getElementById('appVer'); if(el) el.textContent=APP_VERSION; }
