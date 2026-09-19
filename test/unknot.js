@@ -108,5 +108,6 @@
     NAvg:Math.round(good.reduce((s,r)=>s+(r.N||0),0)/Math.max(1,good.length)),
     stirAvg:+(good.reduce((s,r)=>s+r.tries.length-1,0)/Math.max(1,good.length)).toFixed(2),
     secAvg:+(good.reduce((s,r)=>s+r.ms,0)/Math.max(1,good.length)/1000).toFixed(1), totalSec:+((Date.now()-t00)/1000).toFixed(1),
-    rows: out.map(r=>({i:r.i, nc:r.nc, N:r.N, ok:!!r.ok, stir:r.tries? r.tries.length-1 : 0, det3d:r.det3dEnd, sec:+((r.ms||0)/1000).toFixed(1), err:r.err})) };
+    rows: out.map(r=>({i:r.i, nc:r.nc, N:r.N, ok:!!r.ok, stir:r.tries? r.tries.length-1 : 0, det3d:r.det3dEnd, sec:+((r.ms||0)/1000).toFixed(1), err:r.err,
+      tries:r.tries})) };   // попытки целиком: по rad/flat/cross каждой видно, был ли узел почти окружностью или всё ещё клубком
 })()
