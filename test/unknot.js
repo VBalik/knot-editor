@@ -50,19 +50,20 @@
     const A=[], B=[];
     for(let k=1;k<=K;k++){ const w=amp/Math.pow(k,0.55);
       A.push([w*(2*rnd()-1), 2*Math.PI*rnd()]); B.push([w*(2*rnd()-1), 2*Math.PI*rnd()]); }
-    const M=Math.max(900, 16*K*K), pts=[];
+    const M=Math.max(900, Math.min(24000, 20*K*K)), pts=[];
     for(let i=0;i<M;i++){ const t=2*Math.PI*i/M;
       let x=Math.cos(t), y=Math.sin(t);
       for(let k=1;k<=K;k++){ x+=A[k-1][0]*Math.cos(k*t+A[k-1][1]); y+=B[k-1][0]*Math.cos(k*t+B[k-1][1]); }
       pts.push({x, y}); }
     return pts; }
   // диаграмма с ~target пересечениями и нисходящими проходами
+  const AMP=+(process.env.UK_AMP||0.8);
   function makeUnknot(target){
-    const build=(K)=>{ raw=fitToCanvas(wiggly(K, 0.55), 0.92, true); closedCurve=false; drawing=false;
+    const build=(K)=>{ raw=fitToCanvas(wiggly(K, AMP), 0.92, true); closedCurve=false; drawing=false;
       finishCurve(true, true); return crossings.length; };
     // число пересечений растёт примерно как квадрат наивысшей гармоники: ищем K пополам, затем из
     // нескольких кривых с этим K берём ту, что ближе к цели (кривые случайные, разброс заметный)
-    let lo=2, hi=48, K=8;
+    let lo=2, hi=110, K=8;
     for(let it=0; it<8 && lo<=hi; it++){ K=Math.round((lo+hi)/2);
       let nc=0; for(let r=0;r<2;r++) nc=Math.max(nc, build(K));
       if(nc<target) lo=K+1; else hi=K-1; }
@@ -71,7 +72,7 @@
     for(let t=0;t<10;t++){ const sd=_s, nc=build(K);
       if(!bestNc || Math.abs(nc-target)<Math.abs(bestNc-target)){ bestNc=nc; bestSeed=sd; }
       if(Math.abs(nc-target)<=Math.max(2, 0.05*target)) break; }
-    _s=bestSeed; raw=fitToCanvas(wiggly(K, 0.55), 0.92, true); closedCurve=false; drawing=false; finishCurve(true, false);
+    _s=bestSeed; raw=fitToCanvas(wiggly(K, AMP), 0.92, true); closedCurve=false; drawing=false; finishCurve(true, false);
     for(const c of crossings){ c.over=(c.sA<c.sB)? 'A':'B'; c.pending=false; }   // НИСХОДЯЩЕ ⇒ тривиальный узел
     updateCrossInfo(); updateKnotType();
     return {nc:crossings.length, K, det:knotDet, isUnknot}; }
