@@ -283,7 +283,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   <!-- ================= LEFT: 2D drawing ================= -->
   <div id="left" class="pane">
     <div class="topbar">
-      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">4.9</span></span>
+      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">4.10</span></span>
       <button id="restoreLast" title="Restore the last drawing from telemetry">Last</button><button id="clear" class="ghost">Clear</button>
       <span class="seg" id="presets" title="Example knots">
         <button class="ex" data-knot="trefoil" title="Trefoil 3₁">3₁</button>
@@ -317,7 +317,6 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
       <span class="chip" title="Tight packing: the knot shrinks to near contact (held only by contact repulsion). A separate mode — NOT stiffness"><label style="cursor:pointer">Tight <input type="checkbox" id="tightChk"></label></span>
       <span class="chip" title="Self-repulsion r, 1–10: strands cannot come closer than (w+r) units between axes; beyond that a 1/Δ⁴ repulsion (×5 since 2.35)">Repel. <input type="range" id="repCoef" min="1" max="10" step="1" value="2"><b id="repVal">2</b></span>
       <span class="chip" title="Number of tries (minimization attempts), 1–20: each try starts from the diagram with its own random heights of the knot parts; applies to the next run">Tries <input id="msN" type="number" min="1" max="20" value="5"></span>
-      <span class="chip" title="Stir: inflate the final knot k times relative to the tube (the core starts at 1/k, is held, then grows back), then the tries run again">Stir ×<input id="stirInfl" type="number" min="1.5" max="50" step="0.5" value="10" title="inflate ×k: the knot is inflated k times relative to the tube (core starts at 1/k), then standard physics" style="width:44px"></span>
       <button id="play" class="go" title="Physics: run the tries · Pause · Stir: pull loops of the final shape out into free space (topology-safe; mode select: loops | inside-out inversion; falls back to pulling parts apart) and rerun the tries">▶ Physics</button>
       <button id="exportObj" class="ghost" title="Export the 3D model as OBJ">OBJ</button>
       <button id="exportTelem" class="ghost" title="Download relaxation telemetry for diagnostics">Telem</button>
@@ -2800,8 +2799,7 @@ function msRestoreBest(){   // вернуть лучшую попытку; её 
    другой центр/плоскость (STIR_REMAP_TRIES), затем запасной вариант — растаскивание 2.21. Каждая
    новая попытка серии после Stir (и каждый воркер) получает СВОЁ выворачивание исходной формы S0
    (другая «дыра»/плоскость) — максимальное разнообразие стартов. ---- */
-const STIR_SUB=8, STIR_REMAP_TRIES=6; let STIR_MODE='inflate';   // основная программа: Stir = раздутие ×k (петли/выворачивание остаются в коде для лаборатории stir.html)
-let STIR_INFL=10, _inflStart=0, _inflCapK=0, _inflCapT0=0; const STIR_INFL_HOLD=600, STIR_INFL_RAMP=1500;   // расписание ядра после раздутия: удержание 1/k, затем геометрический подъём к номиналу   // Stir «inflate ×k» (лаборатория 2026-09-14): раздуть узел в k раз относительно трубки = ядро стартует с 1/k номинала; _inflStart — заявка на старт попытки (расходуется в startPhysics)   // режим Stir: loops | invert (воркер получает в s0.mode)
+const STIR_SUB=8, STIR_REMAP_TRIES=6; let STIR_MODE='open';   // основная программа: Stir = разжатие тугих контактов (петли/выворачивание остаются в коде)
 const STIR_ARC=0.125, STIR_HR=[1.5,6], STIR_HMIN=0.25, STIR_SEP=45, STIR_K=[2,4], STIR_LEN=2.0, STIR_SKIP=0.3;   // 2026-09-14 по просьбе: петли вдвое уже (дуга 0.125·Rk) и больше (2–4), бюджет длины до n′≤3n
 // STIR_ARC — длина дуги (доля Rk); STIR_HR — высота петли H_t=U(1.5,6)·ρ_i, ρ_i=|X[i]−O| — исходное расстояние точки от центра (поправка E, 2026-09-13; H<0.8·1.5·ρ_i — отказ low);
 // STIR_HMIN — мин. высота бортов (доля Rk); STIR_SEP — мин. угол между направлениями петель (град); STIR_K — петель за ремап; STIR_LEN — кап добавки длины (доля N·L0):
@@ -3095,7 +3093,6 @@ function stirLoopsImage(X, L0v, seed, excl, sCore){   // образ S0 с пет
 function stirRemapOnce(seed){   // ремап S0 → verts (петли или выворачивание); проверки вложенности и det; null — отказ (verts возвращены к S0)
   const S0=_stirS0; _stirPins=null; _pinsFresh=false; if(!S0){ _stirLastRej='n'; return null; }   // пины — только от удачного ремапа петель
   if(S0.N!==N) _stirSetVerts(S0.verts, S0.L0); _stirN0=S0.N;   // ремап всегда от S0 с N0 вершинами (поправка F: попытка/воркер могут прийти с N'); L0 не меняется
-  if(STIR_MODE==='inflate'){ _stirSetVerts(S0.verts, S0.L0); recenter(); _stirPins=null; _pinsFresh=false; _inflStart=1/Math.max(1.01,STIR_INFL); return {mode:'inflate', k:STIR_INFL, disp:0, det:S0.det, detChecked:false}; }   // раздутие: S0 как есть, ядро с 1/k
   const rnd=_lcg(seed); const X=S0.verts.map(v=>[v.x,v.y,v.z]);
   _stirLastRej='';
   const r = STIR_MODE==='loops' ? stirLoopsImage(X, S0.L0, seed, _stirHoles, S0.s) : stirInvertImage(X, S0.L0, rnd, _stirHoles);
@@ -3123,7 +3120,7 @@ function stirRemapLift(seed){   // выворачивание S0 в отдель
   if(r){ f=new Float32Array(N*3); for(let i=0;i<N;i++){ f[3*i]=verts[i].x; f[3*i+1]=verts[i].y; f[3*i+2]=verts[i].z; } }
   _stirSetVerts(keep, L0k); return f;   // N мог измениться (поправка F)
 }
-function stirCancel(){ _stirS0=null; _stirHoles=[]; _stirN0=0; _inflStart=0; _stirPins=null; _pinsFresh=false; _pinPos=null; _pinMob=null; _stirPending=null; physChgCancel(); if(!_stir) return; _stir=null; _stirX0=null; const p=document.getElementById('play'); if(p){ p.disabled=false; p.textContent='▶ Physics'; p.classList.remove('stir'); } _playStir=false; }
+function stirCancel(){ _stirS0=null; _stirHoles=[]; _stirN0=0; _stirPins=null; _pinsFresh=false; _pinPos=null; _pinMob=null; _stirPending=null; physChgCancel(); if(!_stir) return; _stir=null; _stirX0=null; const p=document.getElementById('play'); if(p){ p.disabled=false; p.textContent='▶ Physics'; p.classList.remove('stir'); } _playStir=false; }
 let _playStir=false;        // единая кнопка: после финала серии «▶ Physics» становится «Stir»
 function stirEnable(on){ const b=document.getElementById('play'); if(!b) return; _playStir=!!on;
   if(on){ b.textContent='▶ Stir'; b.classList.add('stir'); b.classList.remove('running'); b.disabled=false; }
@@ -3141,6 +3138,41 @@ function stirField(){   // K случайных частей, у каждой с
   if(m>1e-300) for(let i=0;i<n;i++){ _stirUx[i]/=m; _stirUy[i]/=m; _stirUz[i]/=m; }
   if(_stir) _stir.fields++;
 }
+// 4.10: ПОЛЕ «РАЗЖАТЬ ТУГИЕ КОНТАКТЫ». Прежний Stir (раздутие ×k) был измеренно инертен: длина нити
+// закреплена, энергия изгиба от масштаба не зависит — значит размер узла задаёт длина, а не ядро, и
+// уменьшение ядра просто выключало единственную силу, способную что-то раздвинуть (замер: за все 2100
+// шагов расписания радиус инерции менялся на 0.03 %, отпечаток формы — на 0.1 %). Здесь наоборот: берём
+// пары прядей с НАИМЕНЬШИМ зазором — именно они держат конформацию — и толкаем каждую пару врозь по
+// вектору сближения. Толчок раскладывается колоколом вдоль нити (иначе в ломаной был бы излом), поле
+// сглаживается тем же оператором (I+200Δ)⁻¹, что и случайное. Дальше всё как в растаскивании: те же капы,
+// локальный сертификат и проекция длин, поэтому пряди по-прежнему не проходят друг сквозь друга
+const STIR_OPEN_K=6, STIR_OPEN_W=0.035;   // сколько контактов разжимаем за раз и полуширина колокола (доля нити)
+function stirFieldContacts(){
+  const n=N; if(!_stirUx || _stirUx.length!==n){ _stirUx=new Float64Array(n); _stirUy=new Float64Array(n); _stirUz=new Float64Array(n); }
+  _stirUx.fill(0); _stirUy.fill(0); _stirUz.fill(0);
+  _closeCollect=[]; _closeThr=sExcl()+2.5*L0;
+  energyGrad(true, true);                       // только отталкивание — заодно собирает близкие чужие пары
+  const close=_closeCollect; _closeCollect=null;
+  const m=close.length>>3, ord=[];
+  for(let c=0;c<m;c++) ord.push(c);
+  ord.sort((a,b)=>close[8*a+7]-close[8*b+7]);   // от самого тугого контакта
+  const used=new Uint8Array(n), half=Math.max(4, Math.round(n*STIR_OPEN_W));
+  const bump=(at, dx, dy, dz)=>{ for(let d=-half; d<=half; d++){ const k=((at+d)%n+n)%n;
+      const w=Math.cos(1.5707963*d/half), g=w*w;   // колокол cos²: на краях ноль и по значению, и по наклону
+      _stirUx[k]+=dx*g; _stirUy[k]+=dy*g; _stirUz[k]+=dz*g; used[k]=1; } };
+  let taken=0;
+  for(const c of ord){ if(taken>=STIR_OPEN_K) break;
+    const i=close[8*c], j=close[8*c+1], x=close[8*c+7]; if(!(x>1e-12)) continue;
+    if(used[i]||used[j]) continue;               // один участок нити — один толчок, иначе толчки гасят друг друга
+    const nx=close[8*c+4]/x, ny=close[8*c+5]/x, nz=close[8*c+6]/x;   // n̂ — от j к i
+    bump(i, nx, ny, nz); bump(j, -nx, -ny, -nz); taken++; }
+  if(!taken){ stirField(); return; }             // контактов нет вовсе — узел и так свободен, берём случайное поле
+  sobolevH1(200, _stirUx, _stirUy, _stirUz);
+  let mx=0; for(let i=0;i<n;i++) mx=Math.max(mx, Math.hypot(_stirUx[i],_stirUy[i],_stirUz[i]));
+  if(mx>1e-300) for(let i=0;i<n;i++){ _stirUx[i]/=mx; _stirUy[i]/=mx; _stirUz[i]/=mx; }
+  if(_stir){ _stir.fields++; _stir.opened=taken; }
+}
+function stirRefield(){ if(_stir && _stir.mode==='open') stirFieldContacts(); else stirField(); }
 function stirStart(){
   if(running || _stir || !verts.length) return false;
   { const g=energyGrad(false);                       // ядро шире зазоров (ползунки сдвинуты после финала) — сдуть, стадия A раскроет заново
@@ -3159,10 +3191,10 @@ function stirStart(){
     const d0=_detRobust(3);
     _stirS0={verts:verts.map(v=>v.clone()), N, L0, det:(d0!==null? d0 : _runDet), s:sNominal()}; _stirN0=N;   // ядро — один раз (в воркере _thickFit другой); N0 — к нему возвращает фаза 3
     if(!same){ _stirHoles=[]; _stirSeed=1+Math.floor(Math.random()*1e6); } }
-  { const el=document.getElementById('stirMode'); if(el && (el.value==='loops'||el.value==='invert'||el.value==='inflate')) STIR_MODE=el.value; }   // пустой мок стенда режим не перекрывает
-  _stir.mode='remap?'; _stir.rej=[]; setStatus(STIR_MODE==='loops'? 'stirring… pulling loops out' : STIR_MODE==='inflate'? 'stirring… inflating ×'+STIR_INFL : 'stirring… turning inside out');
+  { const el=document.getElementById('stirMode'); if(el && (el.value==='loops'||el.value==='invert'||el.value==='open')) STIR_MODE=el.value; }   // пустой мок стенда режим не перекрывает
+  _stir.mode='remap?'; _stir.rej=[]; setStatus(STIR_MODE==='loops'? 'stirring… pulling loops out' : STIR_MODE==='open'? 'stirring… opening tight contacts' : 'stirring… turning inside out');
   const run=()=>{ if(!_stir) return;
-    if(STIR_MODE==='inflate'){ _stir.mode='inflate'; _stir.remap={mode:'inflate', k:STIR_INFL}; _stir.disp=0; _stir.i=1; _inflStart=1/Math.max(1.01,STIR_INFL); stirFinish(); return; }   // раздутие: форма S0 без изменений, ядро с 1/k
+    if(STIR_MODE==='open'){ _stirS0=null; _stirHoles=[]; _stirN0=0; _stir.mode='open'; stirFieldContacts(); setStatus(stirStatus()); return; }   // разжатие контактов: итеративное, как растаскивание
     let rm=null; for(let t=0; t<STIR_REMAP_TRIES && !rm; t++){ rm=stirRemapOnce(_stirSeed++); if(!rm){ _stir.rej.push(_stirLastRej); if(_stirTerminal(_stirLastRej)) break; } }
     if(rm){ _stir.mode=STIR_MODE; _stir.remap=rm; _stir.disp=rm.disp; _stir.i=1; stirFinish(); return; }
     _stirS0=null; _stirHoles=[]; _stirN0=0; _stir.mode='pull'; stirField(); setStatus('stirring… 0%'); };
@@ -3176,7 +3208,7 @@ function stirStart(){
   return true;
 }
 function stirPct(){ return _stir? Math.min(99, Math.round(100*Math.max(_stir.disp/Math.max(1e-12,_stir.target), _stir.i/_stir.n))) : 0; }
-function stirStatus(){ return 'stirring… pulling parts apart ('+stirPct()+'%)'; }
+function stirStatus(){ return 'stirring… '+(_stir&&_stir.mode==='open'? 'opening tight contacts' : 'pulling parts apart')+' ('+stirPct()+'%)'; }
 function stirStep(){
   if(!_stir) return false;
   if(_stir.mode==='remap?') return true;                          // ремап ещё не выполнен (отложен на кадр)
@@ -3216,7 +3248,7 @@ function stirStep(){
     if(!fixed) break;
   }
   let fm=0; for(let i=0;i<n;i++) fm=Math.max(fm, Math.hypot(_fx[i],_fy[i],_fz[i]));
-  if(fm<1e-300){ stirField(); _stir.i++; return true; }
+  if(fm<1e-300){ stirRefield(); _stir.i++; return true; }
   let k=1;                                                       // доля общего капа (уменьшается при отказе)
   const x0=verts.map(v=>v.clone()); let ok=false, mvT=0, e1=null;
   for(let tr=0; tr<3 && !ok; tr++){
@@ -3234,7 +3266,7 @@ function stirStep(){
     if(!ok){ for(let i=0;i<n;i++) verts[i].copy(x0[i]); k*=0.35; if(!isFinite(e1.E)) _stir.rejInf++; else _stir.rejLoc++; }   // упёрлись — шаг меньше
   }
   if(ok){ _stir.moved+=mvT; _stir.gminMin=Math.min(_stir.gminMin, e1.gmin); _stir.stall=0; recenter(); }
-  else { _stir.rejected++; _stir.rejB++; if(++_stir.stall>=STIR_STALL){ _stir.stall=0; stirField(); } }   // застряли — другие стороны
+  else { _stir.rejected++; _stir.rejB++; if(++_stir.stall>=STIR_STALL){ _stir.stall=0; stirRefield(); } }   // застряли — новое поле
   let d=0; for(let i=0;i<n;i++){ const q=verts[i].distanceTo(_stirX0[i]); if(q>d) d=q; } _stir.disp=d;   // наибольший сдвиг вершины от начала Stir
   _stir.i++;
   if(_stir.disp>=_stir.target || _stir.i>=_stir.n){ stirFinish(); return false; }
@@ -3248,15 +3280,15 @@ function stirFinish(){
   const R1=knotRadius(), dEnd=_detRobust(3), grow=R1/Math.max(1e-9,st.R0), dispR=st.disp/Math.max(1e-9,st.R0);
   const warn=(dEnd!==null && st.det>0 && dEnd!==st.det) ? '⚠ knot type changed by stir (det '+st.det+' → '+dEnd+') · ' : '';
   _dbgStir={mode:st.mode, remap:st.remap||null, rej:st.rej||[], steps:st.i, rejected:st.rejected, rejB:st.rejB, rejInf:st.rejInf, rejLoc:st.rejLoc, fields:st.fields, moved_L0:+(st.moved/L0).toFixed(2), disp_R:+dispR.toFixed(2), disp_L0:+(st.disp/L0).toFixed(2), grow:+grow.toFixed(3), gminMin_s:+(st.gminMin/Math.max(1e-12,st.s)).toFixed(3), det0:st.det, det1:dEnd, tooTight:false};
-  if(st.mode==='pull' && st.disp<0.5*L0){    // только растаскивание: узел слишком плотный, части не сдвинулись — серию не запускаем
+  if((st.mode==='pull'||st.mode==='open') && st.disp<0.5*L0){    // только растаскивание: узел слишком плотный, части не сдвинулись — серию не запускаем
     _dbgStir.tooTight=true; stirEnable(true);
     const pill=document.getElementById('statusPill'); if(pill && pill.classList){ pill.classList.remove('run'); pill.classList.add('done'); }
-    showError(warn+'stir: knot too tight to pull apart ('+st.rejected+'/'+st.i+' steps rejected) — reduce Thick./Repel.');
+    showError(warn+'stir: knot too tight to loosen ('+st.rejected+'/'+st.i+' steps rejected) — reduce Thick./Repel.');
     return;
   }
   _fromLift=true; _liftFromDiagram=false;        // разрыхлённая форма — лифт новой серии попыток (без перестройки из диаграммы)
   startPhysics();
-  _stirWarn=warn; _stirNote = st.mode==='inflate' ? ' · stirred (inflated ×'+(st.remap&&st.remap.k)+')' : st.mode==='loops' ? ' · stirred ('+((st.remap&&st.remap.loops)? st.remap.loops.length : 0)+' loops out)' : st.mode==='invert' ? ' · stirred (inside out)' : ' · stirred (parts moved '+dispR.toFixed(1)+'·R'+(st.rej&&st.rej.length? '; remap rejected: '+st.rej.join(',') : '')+')';   // пометки на всю серию (startPhysics уже отработал)
+  _stirWarn=warn; _stirNote = st.mode==='open' ? ' · stirred (contacts opened '+dispR.toFixed(1)+'·R)' : st.mode==='loops' ? ' · stirred ('+((st.remap&&st.remap.loops)? st.remap.loops.length : 0)+' loops out)' : st.mode==='invert' ? ' · stirred (inside out)' : ' · stirred (parts moved '+dispR.toFixed(1)+'·R'+(st.rej&&st.rej.length? '; remap rejected: '+st.rej.join(',') : '')+')';   // пометки на всю серию (startPhysics уже отработал)
   _msStretchMild=true;
   if(runLog && _stirEv.length){ runLog.events=_stirEv.map(e=>({...e, st:0})); } _stirEv=[];
   setStatus(runStatus());
@@ -3306,8 +3338,7 @@ function parBest(P){   // лучший среди готовых результ�
 }
 function stirDeflateLive(){ updateGeomUnits(); const g=minSegGapRep(), sN=sNominal(); if(!(g>1.02*sN)) _inflate=Math.min(_inflate, Math.max(1e-4, g/(1.3*sN))); if(_stir) _stir.s=sN; }
 window.__knotStir=(k)=>{ if(!_stir && !stirStart()) return {started:false, running}; if(_stirPending){ const f=_stirPending; _stirPending=null; f(); } let c=0; while(_stir && c<(k||STIR_STEPS)){ stirStep(); c++; } return {stir:!!_stir, i:_stir?_stir.i:null, running, dbg:_dbgStir}; };
-window.__stirInfl=(k)=>{ if(k>1) STIR_INFL=k; const el=document.getElementById('stirInfl'); if(el) el.value=STIR_INFL; return STIR_INFL; };   // стенд: коэффициент раздутия
-window.__stirMode=(m)=>{ if(m==='loops'||m==='invert'||m==='inflate'){ STIR_MODE=m; const el=document.getElementById('stirMode'); if(el) el.value=m; } return STIR_MODE; };   // стенд: режим Stir до __knotStir
+window.__stirMode=(m)=>{ if(m==='loops'||m==='invert'||m==='open'){ STIR_MODE=m; const el=document.getElementById('stirMode'); if(el) el.value=m; } return STIR_MODE; };   // стенд: режим Stir до __knotStir
 window.__stirPin=(b)=>{ if(b!==undefined) STIR_PIN=!!b; return STIR_PIN; };   // стенд: пины до __knotStir (false — веер без фаз); в UI переключателя нет (2.40: пины всегда)
 function relaxStep(){
   if(!running || !verts.length) return;
@@ -3441,8 +3472,7 @@ function relaxStep(){
     let next=0;
     // ядро s_eff всегда ниже фактического зазора (иначе энергия бесконечна):
     // цель s_eff = gmin/1.3; принудительная ступень — не выше 0.95·gmin
-    let cap=1; if(_inflCapK>1){ const t=stepCounter-_inflCapT0; cap = t<STIR_INFL_HOLD ? 1/_inflCapK : Math.min(1, Math.pow(1/_inflCapK, 1-Math.min(1,(t-STIR_INFL_HOLD)/STIR_INFL_RAMP)));
-      if(cap>=1){ _inflCapK=0; if(_kBmul){ _annStep=0; _annLast=0; annApply(1); } } }   // расписание раздутия окончено — отжиг с полным разбросом заново
+    const cap=1;   // 4.10: расписание раздутия Stir снято — ратчет ничем не ограничен
     if(accepted){ const want=_gminAcc/(1.3*sN); if(want>=_inflate*(1+KAPPA)) next=want; }
     if(next===0){ _inflStall++;
       if(_inflStall>=50 || (accepted && fRel<ftolI)){ const room=(accepted?_gminAcc:g0.gminRep)*0.95/sN;
@@ -4522,10 +4552,11 @@ function _workerSource(){
       } else {
         _setVertsFrom(_vertsFromFlat(m.lift)); recenter(); _liftFromDiagram=false; _fromLift=true;   // без сплайна: лифт уже с равными рёбрами, а сплайн не сертифицирован
         knotDet=m.knotDet; isUnknot=!!m.isUnknot;   // тип диаграммы — для проверки лифта и логики окружности
-        if(m.s0){   // 2.24: своё выворачивание S0 вокруг следующей «дыры» (дыры 0…k−1 уже заняты: главный поток и воркеры с меньшим k)
+        // 4.10: свой ремап S0 воркер строит только для режимов с ремапом (петли/выворачивание). Разжатие
+        // контактов итеративное и живёт в главном потоке — воркеру достаётся уже разрыхлённая форма в m.lift
+        if(m.s0 && (m.s0.mode==='loops' || m.s0.mode==='invert')){   // 2.24: своё выворачивание S0 вокруг следующей «дыры» (дыры 0…k−1 уже заняты: главный поток и воркеры с меньшим k)
           _stirS0={verts:_vertsFromFlat(m.s0.verts), N:m.s0.verts.length/3, L0:(m.s0.L0>0? m.s0.L0 : L0), det:m.s0.det, s:m.s0.s}; _stirN0=_stirS0.N; STIR_MODE=m.s0.mode||STIR_MODE; if(m.s0.pin!==undefined) STIR_PIN=!!m.s0.pin; _stirHoles=m.s0.holes.map(_stirHoleClone); let seed=m.s0.seed;   // реплей — в режиме главного потока; N0/L0 — от S0, не от лифта (поправка F: лифт при N')
-          if(m.s0.mode==='inflate'){ _inflStart=1/Math.max(1.01, m.s0.infl||STIR_INFL); _stirPins=null; _pinsFresh=false; }   // раздутие: лифт = S0, ядро с 1/k (применит startPhysics)
-          else { let own=null; for(let t=0; t<m.s0.k-1+STIR_REMAP_TRIES && !own; t++){ const keep=verts.map(v=>v.clone()), L0k=L0; const r=stirRemapOnce(seed++);
+          { let own=null; for(let t=0; t<m.s0.k-1+STIR_REMAP_TRIES && !own; t++){ const keep=verts.map(v=>v.clone()), L0k=L0; const r=stirRemapOnce(seed++);
             if(r && t>=m.s0.k-1) own=r; else if(r){ _stirSetVerts(keep, L0k); } else if(_stirTerminal(_stirLastRej)) break; }   // первые k−1 удач — дыры других воркеров (N ремапа может отличаться)
           if(!own){ _stirSetVerts(_vertsFromFlat(m.lift), _stirS0.L0); applyStretch(0.7,0.7); _stirPins=null; _pinsFresh=false; } }   // пины последнего (чужого) реплея — не наши
           _stirS0=null; _stirHoles=[]; }
@@ -4571,8 +4602,7 @@ function parStart(kind){
   _par={K, W, next:0, done:0, total:K, queue:[], jobs:[], active:new Map(), results:new Array(K).fill(null), kind, payload, preview:null, dirty:false, t0:performance.now(), failed:0, skipped:0, wins:[], s0:null, pins:pins0};
   if(kind==='lift' && _stirS0){   // 2.23/2.24: воркер k сам выворачивает S0 вокруг k-й «дыры» (главный поток не замораживается); N лифта может отличаться от N0 (поправка F)
     const n0=_stirS0.N, f=new Float32Array(n0*3); for(let i=0;i<n0;i++){ f[3*i]=_stirS0.verts[i].x; f[3*i+1]=_stirS0.verts[i].y; f[3*i+2]=_stirS0.verts[i].z; }
-    _par.s0={verts:f, N0:n0, L0:_stirS0.L0, det:_stirS0.det, s:_stirS0.s, mode:STIR_MODE, pin:STIR_PIN, infl:STIR_INFL, holes:_stirHoles.map(_stirHoleClone), seed:_stirSeed}; _stirSeed+=K; }
-  _inflStart=0;   // заявка раздутия относится к попыткам воркеров, не к следующему старту главного потока
+    _par.s0={verts:f, N0:n0, L0:_stirS0.L0, det:_stirS0.det, s:_stirS0.s, mode:STIR_MODE, pin:STIR_PIN, holes:_stirHoles.map(_stirHoleClone), seed:_stirSeed}; _stirSeed+=K; }
   if(kind==='diagram'){ _stirS0=null; _stirHoles=[]; _stirN0=0; }
   for(let k=0;k<K;k++) _par.wins.push(msResultAdd(k+1+_msOffset, NaN, _msLift, ' · running'));   // живые окна всех попыток: видно, что считаются одновременно
   for(let k=0;k<K;k++){ _par.jobs.push({slot:k+_msOffset, win:_par.wins[k]}); _par.queue.push(k); }   // задания воркеров
@@ -4818,7 +4848,6 @@ function startPhysics(){
     // ядро помещается (зазор > 1.02·s — возобновление из покоя, равновесие сидит у 1.1–1.3·s) — не сдувать:
     // сдувание с усиленным хвостом раздвигало узел на ~L0 при каждом возобновлении
     _inflate = (g1>1.02*sNominal()) ? 1 : Math.min(1, Math.max(1e-4, g1/(1.3*sNominal())));
-    if(_inflStart>0){ _inflate=Math.min(_inflate, _inflStart); _inflCapK=1/_inflStart; _inflCapT0=0; _inflStart=0; } else _inflCapK=0;   // Stir «inflate ×k»: ядро с 1/k номинала — узел раздут в k раз относительно трубки; ратчет раскроет
     _inflJammed=false; _inflChkVal=_inflate; _inflChkStep=0;
   }
   stepCounter=0; _nextSnap=25; _frameNo=0; recordEvery=1;
@@ -4900,7 +4929,6 @@ document.getElementById('play').onclick=()=>{
   const fix=()=>{ let v=Math.round(+el.value); if(!(v>=1)) v=MULTI_START; v=Math.max(1, Math.min(20, v)); el.value=String(v); MULTI_START=v; };
   if(el){ el.oninput=rd; el.onchange=fix; rd(); } }
 { const el=document.getElementById('stirMode'); if(el){ el.value=STIR_MODE; el.onchange=()=>{ if(el.value==='loops'||el.value==='invert'||el.value==='inflate') STIR_MODE=el.value; }; } }
-{ const el=document.getElementById('stirInfl'); if(el && el.type==='number'){ el.value=STIR_INFL; el.onchange=()=>{ const k=+el.value; if(k>1) STIR_INFL=k; }; } }   // коэффициент раздутия   // режим Stir: loops | invert
 
 const bendCoefEl=document.getElementById('bendCoef'), repCoefEl=document.getElementById('repCoef');
 const thick=document.getElementById('thick');
@@ -5171,7 +5199,7 @@ window.__knotSetVerts=(arr)=>{ if(!arr||arr.length<8) return false; _liftFromDia
   N=verts.length; allocBuffers(); resampleEqualArc(); recenter();
   rebuildTube(); fitCamera(false); return {N,L0:+L0.toFixed(5)}; };
 // ВЕРСИЯ ИНТЕРФЕЙСА: X задаёт пользователь, Y растёт на 1 с каждой новой сборкой
-const APP_VER_MAJOR=4, APP_VER_MINOR=9;   // 4.9 (2026-09-19): жёсткость верёвочки под рукой зафиксирована на 8, ползунок Rigid. убран из панели 2D (пользователь выбрал значение и попросил убрать орган управления)   // 4.8 (2026-09-19): перетаскивание переписано как чистая геометрическая деформация: smooth[k] = base[k] + (курсор − точка захвата)·w[k], где w — колокол Гаусса по длине дуги от точки захвата, посчитанный один раз при захвате. Сумма гладких функций гладкая — ни острого угла у руки, ни «гармошки»; форма зависит только от положения курсора, а не от числа событий мыши   // 4.7 (2026-09-18): нижняя прядь у пересечения обрывается РОВНО и ВДОЛЬ верхней (круглый торец читался как обрубленная нитка): концевой участок куска плавно, кубикой, сводится к нормали верхней пряди, а ровный торец строится перпендикулярно последнему отрезку — то есть параллельно верхней пряди при любом угле пересечения   // 4.6 (2026-09-18): контактная отметина на срезе нижней пряди убрана (source-atop клал её и на тень верёвочки на бумаге — вдвое более широкую, и вместо тени выходил серый прямоугольник поперёк); перетаскивание: вязкость не действует там, где держит рука (точка обгоняла мышку, закрепление возвращало её — верёвочка ломалась углом ровно под рукой), на отпускании форма больше не меняется (ни «успокоения», ни пересборки сплайном — не было бы рывка), жёсткость по умолчанию 7   // 4.5 (2026-09-18): верёвочка в 2D без «чешуи» и швов — разрыв у пересечения не выстригается из готового рисунка, а РЕЖЕТСЯ сама кривая: каждый кусок рисуется ровно один раз (дважды положенные полупрозрачные слои давали чешую, ровные торцы дорисовки — тёмные волоски); рука тянет узел колоколом Гаусса (под рукой ход равен ходу мышки, вдали почти ноль) с ползунком жёсткости Rigid. 1–10   // 4.4 (2026-09-18): разрыв и кольцо у пересечения стали мелкими — «кто сверху» держится на тени верхней пряди; замкнутая диаграмма сразу в режиме редактирования: курсор-ладошка, узел берут рукой и тянут как верёвку (нерастяжимо, с упругостью и вязкостью), пересечения и выбранные проходы едут следом   // 4.3 (2026-09-18): верёвочка без «чешуи» — блик и притенение смещаются по НОРМАЛИ к кривой со стороны света, а не в одну сторону экрана; контактная тень — короткая отметина с затуханием на срезе нижней пряди, а не полоса вдоль всей верхней (она мазала соседние пряди тёмными штрихами); свивка убрана   // 4.2 (2026-09-18): картинку можно бросить прямо в поле 2D (кнопка Image переименована в Upload); линия в 2D — тонкая верёвочка: тень на бумаге, тёмная оплётка, светотень и блик, редкая свивка; пересечение режется ВДОЛЬ верхней пряди, и она кладёт контактную тень на срезы нижней   // 4.1 (2026-09-18): второй уровень порога включается только тогда, когда маска первого уровня не похожа на рисунок линией (мало чернил, короткая суммарная линия) — на фото с неровной чернильностью штриха бледные участки больше не теряются; зерно убирается медианой 3×3, а не средним (среднее затягивало узкие разрывы)   // 4.0 (2026-09-15): распознавание скетчей на бумаге — порог по второму уровню Оцу (у штриха есть тёмное ядро, у клетки, зерна и пятен нет), фон без сдвига у края кадра (рамка в морфологии, зеркало в сглаживании), чернильность по сглаженному 3×3 кадру, «упор» нижней пряди — по настоящему разрыву в маске, слияние вытянутого X при любом угле, мост длиннее привычного разрыва запрещён   // 3.9 (2026-09-15): пересечения картинки без видимого разрыва — белые кружки (проход не выбран), Physics недоступна до выбора всех; кнопка Stir — как Physics, но синяя   // 3.8 (2026-09-15): распознавание рисунка пером с двойным следом — «линза» и параллельная шпора в скелете, стык разрывов пера, без «ослабленных» мостов через весь рисунок, строгий второй проход для оставшихся концов   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
+const APP_VER_MAJOR=4, APP_VER_MINOR=10;   // 4.10 (2026-09-19): Stir «раздутие ×k» убран — замер показал, что за все 2100 шагов его расписания форма не меняется (радиус инерции 0.03 %, отпечаток формы 0.1 %): длина нити закреплена, энергия изгиба от масштаба не зависит, поэтому сжатие ядра просто выключало единственную силу, способную раздвинуть пряди. Вместо него Stir = разжатие тугих контактов: пары прядей с наименьшим зазором толкаются врозь колоколом вдоль нити, с прежними капами и сертификатами   // 4.9 (2026-09-19): жёсткость верёвочки под рукой зафиксирована на 8, ползунок Rigid. убран из панели 2D (пользователь выбрал значение и попросил убрать орган управления)   // 4.8 (2026-09-19): перетаскивание переписано как чистая геометрическая деформация: smooth[k] = base[k] + (курсор − точка захвата)·w[k], где w — колокол Гаусса по длине дуги от точки захвата, посчитанный один раз при захвате. Сумма гладких функций гладкая — ни острого угла у руки, ни «гармошки»; форма зависит только от положения курсора, а не от числа событий мыши   // 4.7 (2026-09-18): нижняя прядь у пересечения обрывается РОВНО и ВДОЛЬ верхней (круглый торец читался как обрубленная нитка): концевой участок куска плавно, кубикой, сводится к нормали верхней пряди, а ровный торец строится перпендикулярно последнему отрезку — то есть параллельно верхней пряди при любом угле пересечения   // 4.6 (2026-09-18): контактная отметина на срезе нижней пряди убрана (source-atop клал её и на тень верёвочки на бумаге — вдвое более широкую, и вместо тени выходил серый прямоугольник поперёк); перетаскивание: вязкость не действует там, где держит рука (точка обгоняла мышку, закрепление возвращало её — верёвочка ломалась углом ровно под рукой), на отпускании форма больше не меняется (ни «успокоения», ни пересборки сплайном — не было бы рывка), жёсткость по умолчанию 7   // 4.5 (2026-09-18): верёвочка в 2D без «чешуи» и швов — разрыв у пересечения не выстригается из готового рисунка, а РЕЖЕТСЯ сама кривая: каждый кусок рисуется ровно один раз (дважды положенные полупрозрачные слои давали чешую, ровные торцы дорисовки — тёмные волоски); рука тянет узел колоколом Гаусса (под рукой ход равен ходу мышки, вдали почти ноль) с ползунком жёсткости Rigid. 1–10   // 4.4 (2026-09-18): разрыв и кольцо у пересечения стали мелкими — «кто сверху» держится на тени верхней пряди; замкнутая диаграмма сразу в режиме редактирования: курсор-ладошка, узел берут рукой и тянут как верёвку (нерастяжимо, с упругостью и вязкостью), пересечения и выбранные проходы едут следом   // 4.3 (2026-09-18): верёвочка без «чешуи» — блик и притенение смещаются по НОРМАЛИ к кривой со стороны света, а не в одну сторону экрана; контактная тень — короткая отметина с затуханием на срезе нижней пряди, а не полоса вдоль всей верхней (она мазала соседние пряди тёмными штрихами); свивка убрана   // 4.2 (2026-09-18): картинку можно бросить прямо в поле 2D (кнопка Image переименована в Upload); линия в 2D — тонкая верёвочка: тень на бумаге, тёмная оплётка, светотень и блик, редкая свивка; пересечение режется ВДОЛЬ верхней пряди, и она кладёт контактную тень на срезы нижней   // 4.1 (2026-09-18): второй уровень порога включается только тогда, когда маска первого уровня не похожа на рисунок линией (мало чернил, короткая суммарная линия) — на фото с неровной чернильностью штриха бледные участки больше не теряются; зерно убирается медианой 3×3, а не средним (среднее затягивало узкие разрывы)   // 4.0 (2026-09-15): распознавание скетчей на бумаге — порог по второму уровню Оцу (у штриха есть тёмное ядро, у клетки, зерна и пятен нет), фон без сдвига у края кадра (рамка в морфологии, зеркало в сглаживании), чернильность по сглаженному 3×3 кадру, «упор» нижней пряди — по настоящему разрыву в маске, слияние вытянутого X при любом угле, мост длиннее привычного разрыва запрещён   // 3.9 (2026-09-15): пересечения картинки без видимого разрыва — белые кружки (проход не выбран), Physics недоступна до выбора всех; кнопка Stir — как Physics, но синяя   // 3.8 (2026-09-15): распознавание рисунка пером с двойным следом — «линза» и параллельная шпора в скелете, стык разрывов пера, без «ослабленных» мостов через весь рисунок, строгий второй проход для оставшихся концов   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
 const APP_VERSION=APP_VER_MAJOR+'.'+APP_VER_MINOR;   // 3.0, 3.1, … (с 3.0 без дополнения нулём)
 window.__buildTag='v'+APP_VERSION;
 { const el=document.getElementById('appVer'); if(el) el.textContent=APP_VERSION; }
