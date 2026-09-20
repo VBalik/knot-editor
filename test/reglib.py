@@ -47,9 +47,12 @@ def solid_torus(L, timeout=120, tries=3):
     import multiprocessing as mp, time
     pd=[list(t) for t in L.pdData()]
     ctx=mp.get_context('fork')
-    for k in range(tries):
-        q=ctx.Queue(); p=ctx.Process(target=_st_worker, args=(pd, True, q)); t=time.time(); p.start()
-        p.join(timeout)
+    # время распознавания зависит от триангуляции и случайности: чередуем исходную и упрощённую диаграмму,
+    # таймаут растёт (timeout/3, timeout/3, timeout, timeout, …) — всего 2·tries попыток
+    plan=[(False, timeout//3), (True, timeout//3)]+[(k%2==1, timeout) for k in range(2*tries-2)]
+    for simplify, tmo in plan:
+        q=ctx.Queue(); p=ctx.Process(target=_st_worker, args=(pd, simplify, q)); p.start()
+        p.join(tmo)
         if p.is_alive(): p.terminate(); p.join(); continue
         try: return q.get(timeout=5)
         except Exception: continue

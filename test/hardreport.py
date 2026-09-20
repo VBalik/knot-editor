@@ -23,10 +23,12 @@ def certify(key, pd, compare=None, example=None):
     # узлы Regina берём из ExampleLink: та же диаграмма, но isSolidTorus() на триангуляции из fromPD может считать в сотни раз дольше
     L=getattr(regina.ExampleLink, example)() if example else from_pd(pd); t=time.time()
     rec={'crossings':L.size(), 'comps':L.countComponents()}
-    rec['solidTorus']=solid_torus(L, timeout=int(os.environ.get('HR_ST_TIMEOUT',180))) if rec['comps']==1 else None
+    if compare: rec['sameAs'+compare]=(L.sig()==getattr(regina.ExampleLink, compare)().sig())
+    # та же диаграмма (с точностью до отражения/поворота), что у сертифицированного узла Regina → тот же узел: сертификат наследуется
+    if compare and rec['sameAs'+compare] and cache.get(compare, {}).get('solidTorus') is not None: rec['solidTorus']=cache[compare]['solidTorus']; rec['solidTorusFrom']=compare
+    else: rec['solidTorus']=solid_torus(L, timeout=int(os.environ.get('HR_ST_TIMEOUT',180))) if rec['comps']==1 else None
     rec['noR12']=noR12(L)
     size,red,trunc=r3orbit(L, 3000); rec.update(orbit=size, orbitReducible=red, orbitTruncated=trunc)
-    if compare: rec['sameAs'+compare]=(L.sig()==getattr(regina.ExampleLink, compare)().sig())
     rec['sec']=round(time.time()-t,1)
     cache[key]=rec; json.dump(cache, open(f'{OUT}/cert.json','w'), indent=0)
     return rec
