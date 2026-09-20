@@ -47,7 +47,8 @@
   const t0=Date.now(), res=ikRecognize({width:W, height:Hh, data}), ap=ikApply(res);
   const rec={file:path.basename(src), nc:crossings.length, det2d:knotDet, comps:res.notes&&res.notes.comps, pending:pendingCount(), importOk:!!(ap&&ap.ok) && knotDet===1 && (res.notes? res.notes.comps===1 : true) && pendingCount()===0, tries:[]};
   if(!rec.importOk){ rec.ok=false; rec.err='import not exact (need one curve, det 1, no pending crossings)'; return rec; }
-  rec.pd=__require(path.join(process.cwd(),'pdcode.js'))(crossings);   // PD-код импортированной диаграммы (сертификация в Regina, hardreport.py)
+  rec.pd=__require(path.join(process.cwd(),'pdcode.js'))(crossings);  if(process.env.HK_DUMP){ fs.writeFileSync(process.env.HK_DUMP, JSON.stringify({total:totalLen2D, pts:smooth.map(p=>[+p.x.toFixed(2),+p.y.toFixed(2)]), cross:crossings.map(c=>({x:+c.x.toFixed(2),y:+c.y.toFixed(2),sA:+c.sA.toFixed(2),sB:+c.sB.toFixed(2),over:c.over}))})); }   // HK_DUMP=<json>: кривая и пересечения для внешней отрисовки (blackink.py)
+   // PD-код импортированной диаграммы (сертификация в Regina, hardreport.py)
   if(process.env.HK_PDONLY==='1'){ rec.ok=null; return rec; }   // только импорт и PD-код, без физики
   H.set({ms:1}); H.play();
   let done=false;

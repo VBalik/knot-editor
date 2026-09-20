@@ -36,6 +36,7 @@
     const sA=best.sA/totalLen2D*total, sB=best.sB/totalLen2D*total;
     best.over=(cyc(sA,sOver)<=cyc(sB,sOver))? 'A':'B'; best.pending=false; }
   updateCrossInfo(); updateKnotType();
+  if(process.env.HK_DUMP){ fs.writeFileSync(process.env.HK_DUMP, JSON.stringify({total:totalLen2D, pts:smooth.map(p=>[+p.x.toFixed(2),+p.y.toFixed(2)]), cross:crossings.map(c=>({x:+c.x.toFixed(2),y:+c.y.toFixed(2),sA:+c.sA.toFixed(2),sB:+c.sB.toFixed(2),over:c.over}))})); }   // HK_DUMP=<json>: кривая и пересечения для внешней отрисовки (blackink.py)
   const pdProgram=__require(path.join(process.cwd(),'pdcode.js'))(crossings);   // PD-код, каким его видит программа (для сверки с исходным в Regina)
   const out={name:J.name, pdProgram, expectCrossings:J.crossings, nc:crossings.length, matched, unmatched, dmaxPx:+dmax.toFixed(2), det:knotDet, isUnknot, pending:pendingCount()};
   out.importOk = crossings.length===J.crossings && matched===J.crossings && pendingCount()===0;
