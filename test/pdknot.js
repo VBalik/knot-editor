@@ -52,6 +52,8 @@
     const roundness=()=>{ const c=cen(); let mn=Infinity, mx=0, sum=0; for(const v of verts){ const r=Math.hypot(v.x-c.x, v.y-c.y, v.z-c.z); if(r<mn)mn=r; if(r>mx)mx=r; sum+=r; }
       const R=sum/N; let a=0,b=0,d=0,e=0,f=0,g=0; for(const v of verts){ const x=v.x-c.x, y=v.y-c.y, z=v.z-c.z; a+=x*x; b+=x*y; d+=x*z; e+=y*y; f+=y*z; g+=z*z; }
       const ev=Array.from(jacobiEig([[a/N,b/N,d/N],[b/N,e/N,f/N],[d/N,f/N,g/N]]).vals).sort((p,q)=>p-q); return {rad:+((mx-mn)/R).toFixed(4), flat:+(Math.sqrt(Math.max(0,ev[0]))/R).toFixed(4), E:isFinite(_ePrev)? +(+_ePrev).toPrecision(4) : null}; };
+    if(process.env.HK_START){ H.play(); if(H.running()) H.play(); const S0=JSON.parse(fs.readFileSync(process.env.HK_START,'utf8'));   // продолжить с сохранённой 3D-формы (HK_SAVE прежнего прогона)
+      _setVertsFrom(S0.verts.map(v=>new THREE.Vector3(v[0],v[1],v[2]))); recenter(); _fromLift=true; _liftFromDiagram=false; out.startedFrom=process.env.HK_START; }
     const t0=Date.now(); H.set({ms:1}); H.play(); out.tries=[]; let done=false;
     for(let attempt=0; attempt<=NSTIR; attempt++){
       let st=0, o=null; while(true){ o=H.step(200); st+=200; if(!o.running || st>=BUD) break; }
