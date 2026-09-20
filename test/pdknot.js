@@ -10,6 +10,7 @@
   const seg=[]; for(const [i,j] of A) seg.push([V[i], V[j]]);
   for(let k=0;k<n;k++){ const [a,b]=seg[k]; const L=Math.hypot(b[0]-a[0], b[1]-a[1]), m=Math.max(2, Math.round(L/4));
     for(let t=0;t<m;t++) pts.push({x:a[0]+(b[0]-a[0])*t/m, y:a[1]+(b[1]-a[1])*t/m}); }
+  if(process.env.HK_ANN) window.__ann=JSON.parse(process.env.HK_ANN);   // лаборатория отжига (см. annApply в index.html)
   H.el('clear').onclick(); if(H.running()) H.play();
   H.setSlider('thick',+(process.env.UK_THICK||1)); H.setSlider('repCoef',+(process.env.UK_REP||1)); H.setSlider('bendCoef',+(process.env.UK_BEND||9));
   _smoothCap=3000;

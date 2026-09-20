@@ -2238,9 +2238,21 @@ function smoothG(){   // g — сглаженный (I+300Δ)⁻¹ белый ш
   for(let i=0;i<n;i++) X[i]/=m;
   return X;
 }
+// ЛАБОРАТОРИЯ ОТЖИГА (стенд, 4.15; в программе выключено): window.__ann.travel={speed,v0} — профили БЕГУТ вдоль нити
+// (жёсткость вперёд, отталкивание навстречу) на speed вершин за пересчёт, тем медленнее, чем подвижнее узел
+// (÷(1+v/v0), v — сдвиг вершины за принятый шаг в L0); cycles=k — k волн разброса вместо одной (огибающая линейно к нулю);
+// breath={amp,period} — общее отталкивание дышит exp(amp·f·sin) с периодом в шагах
+let _annPhase=0, _annMv=0, _annX=null;
+function _annShift(G, ph){ const n=N; if(!_annX || _annX.length!==n) _annX=new Float64Array(n);
+  for(let i=0;i<n;i++){ let p=i-ph; p-=Math.floor(p/n)*n; const k=Math.floor(p), t=p-k; _annX[i]=G[k%n]*(1-t)+G[(k+1)%n]*t; } return _annX; }
 function annApply(f){   // f∈[0,1] — доля исходного разброса; множители пересчитываются, энергия точки — заново (без сброса памяти L-BFGS)
-  _annSig=f; _annLast=_annStep; const sb=_annSb*f, sr=_annSr*f;
-  for(let i=0;i<N;i++){ _kBmul[i]=Math.exp(sb*_stiffG[i]); _kRmul[i]=Math.exp(sr*_repG[i]); }
+  _annSig=f; _annLast=_annStep; const A=(typeof window!=='undefined' && window.__ann)||{};
+  if(A.cycles>0) f*=0.5*(1+Math.cos(2*Math.PI*A.cycles*_annStep/_annT));
+  const sb=_annSb*f, sr=_annSr*f;
+  let gB=_stiffG, gR=_repG;
+  if(A.travel){ _annPhase+=(A.travel.speed||2)/(1+_annMv/(A.travel.v0||0.05)); gB=Float64Array.from(_annShift(_stiffG, _annPhase)); gR=_annShift(_repG, -_annPhase); }
+  const br=A.breath? Math.exp(A.breath.amp*f*Math.sin(2*Math.PI*_annStep/(A.breath.period||300))) : 1;
+  for(let i=0;i<N;i++){ _kBmul[i]=Math.exp(sb*gB[i]); _kRmul[i]=br*Math.exp(sr*gR[i]); }
   _annFresh=true;
 }
 function profilesClear(){ _kBmul=null; _kRmul=null; _stiffG=null; _repG=null; _annStep=0; _annSig=0; _annFresh=false; _annLast=0; }   // пины Stir здесь НЕ снимаются: stiffPhaseEnd зовёт profilesClear посреди фазы 1 (пины держатся до покоя — pinRelease)
@@ -2249,7 +2261,7 @@ function profilesStart(){   // случайные профили попытки 
   _annSb=A.stiff!==undefined? A.stiff : STIFF_SPREAD; _annSr=A.rep!==undefined? A.rep : REP_SPREAD; _annT=A.steps||STIFF_STEPS;
   _annEvery=Math.max(1, Math.round(A.every||ANN_EVERY)); _annJump=Math.max(1, Math.round(A.jump||_annT/8)); _annHard=!!A.hard;
   if(A.mixTo>_annSb){ const r=Math.random(); _annSb+=r*(A.mixTo-_annSb); _annSr+=r*((A.mixToR||A.mixTo)-_annSr); }   // лаборатория отжига: размах попытки случаен между базовым и mixTo (ln), один r на оба профиля
-  _stiffG=smoothG(); _repG=_stiffG? smoothG() : null;
+  _stiffG=smoothG(); _repG=_stiffG? smoothG() : null; _annPhase=0; _annMv=0;
   if(!_stiffG || !_repG){ profilesClear(); return false; }
   _kBmul=new Float64Array(N); _kRmul=(_wa.mem && _wa.v.kR && _wa.v.kR.length===N)? _wa.v.kR : new Float64Array(N); _annStep=0; annApply(1); return true;   // профиль отталкивания — вид арены (читает Wasm-ядро без копий)
 }
@@ -3565,7 +3577,7 @@ function relaxStep(){
       mvT=Math.sqrt(mvT);
       // gmin считается по парам в радиусе R=(1+TAIL_CUT)·S+1.5·L0 по серединам; невидимые пары имеют зазор ≥ (1+TAIL_CUT)·S+0.5·L0
       if(e1.E<g0.E-1e-12 && e1.gmin>0.55*Math.min(g0.gmin, sExcl()) && mvT<0.5*Math.min(g0.gmin, (1+TAIL_CUT)*sExcl()+0.5*L0)){
-        accepted=true; _ePrev=e1.E; _dbgTier=tier; _gminAcc=e1.gminRep;
+        accepted=true; _ePrev=e1.E; _dbgTier=tier; _gminAcc=e1.gminRep; _annMv=0.8*_annMv+0.2*mvT/L0;
         if(tier>0){ _gdS[0]=_gdS[1]=dt/Math.max(_eta,1e-300); _capScale=Math.min(1, dtCap/Math.max(_eta,1e-300)); }
         break;
       }
