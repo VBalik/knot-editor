@@ -2242,7 +2242,17 @@ function smoothG(){   // g — сглаженный (I+300Δ)⁻¹ белый ш
 // (жёсткость вперёд, отталкивание навстречу) на speed вершин за пересчёт, тем медленнее, чем подвижнее узел
 // (÷(1+v/v0), v — сдвиг вершины за принятый шаг в L0); cycles=k — k волн разброса вместо одной (огибающая линейно к нулю);
 // breath={amp,period} — общее отталкивание дышит exp(amp·f·sin) с периодом в шагах
-let _annPhase=0, _annMv=0, _annX=null;
+// waves={amp,ampR,div:[8,12],speed:[0.5,4],width:[0.5,1.5],v0} — НЕСКОЛЬКО бегущих волн: число ≈ пересечений 2D / случайное из div,
+// каждая со случайным стартом, направлением, скоростью (вершин за пересчёт, ÷(1+v/v0)) и амплитудой ±1; профиль — сумма гауссовых
+// горбов, нормированная на [−1,1]; множитель exp(amp·f·g), размах до ×e^amp (amp=ln 100 → ×100), к концу отжига f→0
+let _annPhase=0, _annMv=0, _annX=null, _annWaves=null;
+function _wavesMake(A){ const W=A.waves, n=N, nc=(typeof crossings!=='undefined' && crossings.length)||Math.round(n/8);
+  const div=W.div||[8,12], sp=W.speed||[0.5,4], wd=W.width||[0.5,1.5], M=Math.max(2, Math.round(nc/(div[0]+Math.random()*(div[1]-div[0]))));
+  const mk=()=>{ const w=[]; for(let k=0;k<M;k++) w.push({c:Math.random()*n, a:(Math.random()<0.5?-1:1)*(0.3+0.7*Math.random()), dir:(Math.random()<0.5?-1:1), v:sp[0]+Math.random()*(sp[1]-sp[0]), s:(wd[0]+Math.random()*(wd[1]-wd[0]))*n/M}); return w; };
+  return {M, B:mk(), R:mk()}; }
+function _wavesProfile(w){ const n=N; if(!_annX || _annX.length!==n) _annX=new Float64Array(n); _annX.fill(0);
+  for(const q of w){ for(let i=0;i<n;i++){ let d=i-q.c; d-=Math.round(d/n)*n; _annX[i]+=q.a*Math.exp(-0.5*d*d/(q.s*q.s)); } }
+  let m=0; for(let i=0;i<n;i++) m=Math.max(m, Math.abs(_annX[i])); if(m>1e-300) for(let i=0;i<n;i++) _annX[i]/=m; return _annX; }
 function _annShift(G, ph){ const n=N; if(!_annX || _annX.length!==n) _annX=new Float64Array(n);
   for(let i=0;i<n;i++){ let p=i-ph; p-=Math.floor(p/n)*n; const k=Math.floor(p), t=p-k; _annX[i]=G[k%n]*(1-t)+G[(k+1)%n]*t; } return _annX; }
 function annApply(f){   // f∈[0,1] — доля исходного разброса; множители пересчитываются, энергия точки — заново (без сброса памяти L-BFGS)
@@ -2251,6 +2261,9 @@ function annApply(f){   // f∈[0,1] — доля исходного разбр�
   const sb=_annSb*f, sr=_annSr*f;
   let gB=_stiffG, gR=_repG;
   if(A.travel){ _annPhase+=(A.travel.speed||2)/(1+_annMv/(A.travel.v0||0.05)); gB=Float64Array.from(_annShift(_stiffG, _annPhase)); gR=_annShift(_repG, -_annPhase); }
+  if(A.waves){ if(!_annWaves) _annWaves=_wavesMake(A); const slow=1/(1+_annMv/(A.waves.v0||0.05));
+    for(const q of _annWaves.B) q.c+=q.dir*q.v*slow; for(const q of _annWaves.R) q.c+=q.dir*q.v*slow;
+    gB=Float64Array.from(_wavesProfile(_annWaves.B)); gR=_wavesProfile(_annWaves.R); }
   const br=A.breath? Math.exp(A.breath.amp*f*Math.sin(2*Math.PI*_annStep/(A.breath.period||300))) : 1;
   for(let i=0;i<N;i++){ _kBmul[i]=Math.exp(sb*gB[i]); _kRmul[i]=br*Math.exp(sr*gR[i]); }
   _annFresh=true;
@@ -2261,7 +2274,8 @@ function profilesStart(){   // случайные профили попытки 
   _annSb=A.stiff!==undefined? A.stiff : STIFF_SPREAD; _annSr=A.rep!==undefined? A.rep : REP_SPREAD; _annT=A.steps||STIFF_STEPS;
   _annEvery=Math.max(1, Math.round(A.every||ANN_EVERY)); _annJump=Math.max(1, Math.round(A.jump||_annT/8)); _annHard=!!A.hard;
   if(A.mixTo>_annSb){ const r=Math.random(); _annSb+=r*(A.mixTo-_annSb); _annSr+=r*((A.mixToR||A.mixTo)-_annSr); }   // лаборатория отжига: размах попытки случаен между базовым и mixTo (ln), один r на оба профиля
-  _stiffG=smoothG(); _repG=_stiffG? smoothG() : null; _annPhase=0; _annMv=0;
+  _stiffG=smoothG(); _repG=_stiffG? smoothG() : null; _annPhase=0; _annMv=0; _annWaves=null;
+  if(A.waves){ if(A.waves.amp!==undefined) _annSb=A.waves.amp; _annSr=(A.waves.ampR!==undefined)? A.waves.ampR : _annSb; }
   if(!_stiffG || !_repG){ profilesClear(); return false; }
   _kBmul=new Float64Array(N); _kRmul=(_wa.mem && _wa.v.kR && _wa.v.kR.length===N)? _wa.v.kR : new Float64Array(N); _annStep=0; annApply(1); return true;   // профиль отталкивания — вид арены (читает Wasm-ядро без копий)
 }
