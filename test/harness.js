@@ -147,7 +147,10 @@ const H = {
   bE: bendE,
   det3d: ()=>{ const v=window.__knotDetProj().filter(x=>x!==null).sort((a,b)=>a-b);
     return v.length? v[Math.floor(v.length/2)] : null; },
-  setSlider: (id,v)=>{ const el=getEl(id); el.value=String(v); el.oninput&&el.oninput(); },
+  // 4.13: ползунок Repel. — ×2 (физическое r = 2×ползунок); тесты говорят ФИЗИЧЕСКИМИ значениями,
+  // поэтому setSlider('repCoef', v) ставит элемент в v/2, а oninput страницы возвращает repCoef=v
+  // (эталоны bench.js посчитаны при физических r=2 и r=1 — они не сдвигаются)
+  setSlider: (id,v)=>{ const el=getEl(id); el.value=String(id==='repCoef'? v/2 : v); el.oninput&&el.oninput(); },
   clickPreset: (key)=>{ const b=presetBtns.find(x=>x.attrs['data-knot']===key); b.onclick(); },
   pointer: (type,x,y)=>{ getEl('draw').dispatch(type, {clientX:x, clientY:y, pointerId:7, preventDefault:()=>{}, button:0}); },
   drawCurve: (fn,n)=>{
