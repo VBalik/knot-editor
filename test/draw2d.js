@@ -23,7 +23,7 @@
     for(let i=1;i<=140;i++){ const p=f(i/140); H.pointer('pointermove', p.x, p.y); } }   // перо не отпускаем: кривая открыта
   else if(m){ const R=Math.random; let s=((Math.imul(seed,1103515245)+12345)&0x7fffffff)|1;   // randomKnot берёт зерно из Math.random — подменяем на время вызова
     Math.random=()=>{ s=(Math.imul(s,1103515245)+12345)&0x7fffffff; return s/0x80000000; };
-    try{ randomKnot(+m[1]); } finally { Math.random=R; } }
+    const tg=Date.now(); try{ randomKnot(+m[1]); } finally { Math.random=R; global.__genMs=Date.now()-tg; } }
   else if(/^img$/i.test(kn)){ const src=process.env.IK_IMG; if(!src) throw new Error('KNOT=img требует IK_IMG=<файл>');
     const buf=fs.readFileSync(src); let img;
     if(/\.jpe?g$/i.test(src)){ const j=mod('jpeg-js').decode(buf,{useTArray:true, formatAsRGBA:true, maxMemoryUsageInMB:1024}); img={width:j.width, height:j.height, data:j.data}; }
@@ -68,8 +68,12 @@
   fs.mkdirSync(path.dirname(file), {recursive:true});
   fs.writeFileSync(file, PNG.sync.write(out));
 
+  // 4.12: теснота — минимальное расстояние между пересечениями на ЭКРАНЕ, коэффициент k и диаметр кольца в экранных px
+  const kCrowd=(typeof crowdFactor==='function')? crowdFactor() : 1, mcd=(closedCurve && crossings.length>1)? _minCrossDist()*_v2.s : null;
   return { ok: ink>0 && (open ? (raw.length>1 && !closedCurve) : (crossings.length>0 && closedCurve)), img:file, knot:kn, scale:sc,
     W:px.width, H:px.height, crossings:crossings.length, det:knotDet, unknot:isUnknot, pending:pendingCount(),
+    viewScale:+_v2.s.toFixed(3), minCrossDistScreenPx:mcd===null? null : +mcd.toFixed(2), k:+kCrowd.toFixed(3), ringDiameterScreenPx:+(2*CROSS_RV*kCrowd).toFixed(2),
+    ropeWidthScreenPx:+(Math.max(2.6, Math.min(CURVE_W, CURVE_W*Math.pow(_v2.s,0.35)))*kCrowd).toFixed(2), genMs:global.__genMs||null,
     pixAny:any, pixInk:ink, inkFrac:+(ink/N).toFixed(4), anyFrac:+(any/N).toFixed(4),
     status:H.dbg().status };
 })()
