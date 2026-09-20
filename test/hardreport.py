@@ -15,20 +15,26 @@ def b64(f):
 def esc(s): return html.escape(str(s), quote=True)
 
 # ---------- сертификация (кэш) ----------
+CERT_V=4   # 4: + simplifyStats (300 запусков simplify()). 3: + r3moves, sameAs…Exact. 2: орбита R3 — полный BFS без ранней остановки (размер, число упрощаемых, обрезан ли), плюс simplify_to
 def certify(key, pd, compare=None, example=None):
     cache=load(f'{OUT}/cert.json') or {}
-    if key in cache or NOREG or not (pd or example): return cache.get(key)
+    old=cache.get(key)
+    if (old and old.get('v')==CERT_V) or NOREG or not (pd or example): return old
     import regina
-    from reglib import from_pd, noR12, r3orbit, solid_torus
+    from reglib import from_pd, noR12, r3orbit, solid_torus, simplify_to, simplify_stats
     # узлы Regina берём из ExampleLink: та же диаграмма, но isSolidTorus() на триангуляции из fromPD может считать в сотни раз дольше
     L=getattr(regina.ExampleLink, example)() if example else from_pd(pd); t=time.time()
-    rec={'crossings':L.size(), 'comps':L.countComponents()}
-    if compare: rec['sameAs'+compare]=(L.sig()==getattr(regina.ExampleLink, compare)().sig())
+    rec={'v':CERT_V, 'crossings':L.size(), 'comps':L.countComponents()}
+    if compare:
+        E=getattr(regina.ExampleLink, compare)(); rec['sameAs'+compare]=(L.sig()==E.sig())            # с точностью до отражения, поворота, ориентации
+        rec['sameAs'+compare+'Exact']=(L.sig(False)==E.sig(False))                                    # без отражения: все проходы те же (иначе — зеркало: все проходы обратны)
+    if old and old.get('solidTorus') is not None: rec['solidTorus']=old['solidTorus']; rec['solidTorusFrom']=old.get('solidTorusFrom')   # сертификат узла от версии кэша не зависит
     # та же диаграмма (с точностью до отражения/поворота), что у сертифицированного узла Regina → тот же узел: сертификат наследуется
-    if compare and rec['sameAs'+compare] and cache.get(compare, {}).get('solidTorus') is not None: rec['solidTorus']=cache[compare]['solidTorus']; rec['solidTorusFrom']=compare
+    elif compare and rec['sameAs'+compare] and cache.get(compare, {}).get('solidTorus') is not None: rec['solidTorus']=cache[compare]['solidTorus']; rec['solidTorusFrom']=compare
     else: rec['solidTorus']=solid_torus(L, timeout=int(os.environ.get('HR_ST_TIMEOUT',180))) if rec['comps']==1 else None
     rec['noR12']=noR12(L)
-    size,red,trunc=r3orbit(L, 3000); rec.update(orbit=size, orbitReducible=red, orbitTruncated=trunc)
+    size,red,trunc,r3m=r3orbit(L, int(os.environ.get('HR_ORBIT',3000))); rec.update(orbit=size, orbitReducible=red>0, orbitReducibleCount=red, orbitTruncated=trunc, r3moves=r3m)
+    rec['simplifyTo']=simplify_to(L); rec['simplifyStats']=simplify_stats(L, int(os.environ.get('HR_SIMP_RUNS',300)))
     rec['sec']=round(time.time()-t,1)
     cache[key]=rec; json.dump(cache, open(f'{OUT}/cert.json','w'), indent=0)
     return rec
@@ -37,10 +43,28 @@ def certify(key, pd, compare=None, example=None):
 def run_of(key):
     for f in (f'{OUT}/run2_{key}.json', f'{OUT}/run_{key}.json'):
         r=load(f)
-        if r and r.get('tries') is not None: return r
+        if r and r.get('importOk') and r.get('tries'): return r
     return None
 
 def frac(p,q): return f'{p}/{q}'.replace('-','−')
+def hardness_short(c):
+    if not c: return '—'
+    if not c.get('noR12'): return 'не трудная'
+    if c.get('r3moves')==0: return 'строго трудная: ходов R3 нет'
+    if not c.get('orbitTruncated') and c.get('orbitReducibleCount',0)==0: return 'без роста пересечений не упростить'
+    if c.get('orbitReducibleCount',0)>0 or (c.get('simplifyTo') is not None and c.get('simplifyTo')<c.get('crossings',0)): return 'слабо трудная'
+    return 'трудность не доказана'
+def hardness_text(c):
+    n,red,trunc,simp=c.get('orbit'),c.get('orbitReducibleCount',0),c.get('orbitTruncated'),c.get('simplifyTo')
+    if not c.get('noR12'): return 'есть упрощающий ход R1/R2 — не трудная'
+    if c.get('r3moves')==0: return 'ходов R3 нет — строго трудная'
+    if n==1: return f'орбита R3 из одной диаграммы ({c.get("r3moves")} ходов R3 возвращают её же) — без роста числа пересечений не упростить'
+    if not trunc and red==0: return f'вся орбита R3 ({n} диаграмм) без упрощаемых — без роста числа пересечений не упростить'
+    st=c.get('simplifyStats') or {}
+    tail=(f'; simplify() Regina распутывает до нуля в {st["zeros"]} из {st["runs"]} запусков' if st.get('zeros') else (f'; simplify() Regina до нуля не доводит (лучшее {st["min"]} из {c.get("crossings")})' if st else ''))
+    if red>0: return f'R1/R2 нет, но в орбите R3 есть упрощаемые ({red} из {n}{"+" if trunc else ""} обойдённых) — слабо трудная'+tail
+    if simp is not None and simp<c.get('crossings',0): return f'R1/R2 нет; орбита R3 больше {n} (обход обрезан), но simplify() Regina сводит к {simp} пересечениям — слабо трудная'+tail
+    return f'R1/R2 нет; орбита R3 больше {n} (обход обрезан), упрощаемых не найдено, simplify() не уменьшает — трудность не доказана'
 entries=[]
 J=load(f'{OUT}/monster.json'); entries.append(dict(key='monster', group='lit', title='Monster', sub='«монстр», 10 пересечений',
     source='Regina 7.4 · ExampleLink.monster()', pd=J and J['pd'], example='monster'))
@@ -60,7 +84,7 @@ for h in S['hard']:
     if 'name' not in h: continue
     entries.append(dict(key=h['name'], group='kl', title=f'N([{frac(h["p"],h["q"])}] + [{frac(h["r"],h["s"])}])', sub=f'{h["crossings"]} пересечений',
         source='Kauffman–Lambropoulou: числительное замыкание суммы двух рациональных сплетений, ps + qr = ±1', pd=h['pd'],
-        klOrbit=h['orbit'], klRed=h['orbitReducible']))
+        ))
 J=load(f'{OUT}/gst.json'); entries.append(dict(key='gst', group='control', title='GST', sub='Гомпф–Шарлеманн–Томпсон, 48 пересечений — НЕ тривиальный узел',
     source='Regina 7.4 · ExampleLink.gst()', pd=J and J['pd'], example='gst'))
 
@@ -72,9 +96,8 @@ for e in entries:
     e['nc']=(r or {}).get('nc'); e['importOk']=(r or {}).get('importOk')
     e['sec']=(r or {}).get('sec'); e['N']=(r or {}).get('N')
     c=e['cert'] or {}
-    e['strong']=bool(c.get('noR12')) and c.get('orbit')==1
-    e['hardness']=('нет ходов R3 — строго трудная' if e['strong'] else ('R1/R2 нет; в орбите R3 есть упрощаемая диаграмма' if c.get('orbitReducible') else
-                   (f'R1/R2 нет; орбита R3 ≥ {c.get("orbit")} диаграмм, упрощаемых не найдено' if c.get('noR12') else 'есть упрощающий ход R1/R2'))) if c else '—'
+    e['strong']=bool(c.get('noR12')) and c.get('r3moves')==0
+    e['hardness']=hardness_text(c) if c else '—'
 
 unknots=[e for e in entries if e['group']!='control']
 straight=[e for e in unknots if e['ok']]; stuck=[e for e in unknots if e['run'] and not e['ok']]; norun=[e for e in unknots if not e['run']]
@@ -111,10 +134,12 @@ th{font-weight:500;color:var(--ink2);font-size:12px;letter-spacing:.04em;text-tr
 tr:last-child td{border-bottom:0}
 td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
 td.name{font-weight:500;white-space:nowrap}
-.pill{display:inline-block;font-size:12px;line-height:1;padding:5px 8px;border-radius:999px;font-weight:500;white-space:nowrap}
+td .pill{white-space:nowrap}
+td.hard{min-width:230px}
+.pill{display:inline-block;font-size:12px;line-height:1.25;padding:4px 8px;border-radius:999px;font-weight:500;max-width:100%;overflow-wrap:anywhere}
 .pill.ok{background:var(--okbg);color:var(--ok)}.pill.bad{background:var(--badbg);color:var(--bad)}.pill.acc{background:var(--accbg);color:var(--acc)}.pill.ctl{background:var(--ctlbg);color:var(--ctl)}.pill.mut{background:transparent;color:var(--ink2);border:1px solid var(--line)}
-.cards{display:grid;gap:18px}
-.card{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:18px 20px}
+.cards{display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+.card{min-width:0;border:1px solid var(--line);border-radius:12px;background:var(--card);padding:18px 20px}
 .card header{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;margin-bottom:4px}
 .card header .sub{color:var(--ink2)}
 .card .pills{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 14px}
@@ -146,7 +171,7 @@ def pills(e):
     if c:
         out.append('<span class="pill ok">тривиальный — Regina: дополнение есть полноторие</span>' if c.get('solidTorus') else '<span class="pill ctl">НЕ тривиальный — Regina</span>')
         out.append(f'<span class="pill mut">{esc(e["hardness"])}</span>')
-        if c.get('sameAsgordian'): out.append('<span class="pill ok">та же диаграмма, что Gordian в Regina (сигнатура совпала)</span>')
+        if c.get('sameAsgordian'): out.append('<span class="pill ok">та же диаграмма, что Gordian в Regina: сигнатура совпала '+('с теми же проходами' if c.get('sameAsgordianExact') else 'с точностью до зеркала (все проходы обратны)')+'</span>')
     if e['run']:
         out.append('<span class="pill ok">окружность</span>' if e['ok'] else ('<span class="pill ctl">не распрямился — верно, узел нетривиальный</span>' if e['group']=='control' else '<span class="pill bad">не распрямился за 11 попыток</span>'))
     return ''.join(out)
@@ -170,11 +195,14 @@ def tries_table(e):
 def card(e):
     c=e['cert'] or {}; r=e['run'] or {}
     figs=''
-    if e['img']: figs+=f'<figure><img src="{e["img"]}" alt="Диаграмма {esc(e["title"])} в программе" loading="lazy"><figcaption>Диаграмма в 2D-окне программы: {e["nc"] or c.get("crossings") or "?"} пересечений, разрывы нижней пряди как на экране</figcaption></figure>'
-    if e['proj']: figs+=f'<figure><img src="{e["proj"]}" alt="Конечная 3D-форма {esc(e["title"])}" loading="lazy"><figcaption>Конечная 3D-форма после последней попытки: проекция вдоль наименьшей оси инерции, ближние участки желтее, дальние синее</figcaption></figure>'
+    if e['img']: figs+=f'<figure><img src="{e["img"]}" alt="Диаграмма {esc(e["title"])} в программе"><figcaption>Диаграмма в 2D-окне программы: {e["nc"] or c.get("crossings") or "?"} пересечений, разрывы нижней пряди как на экране</figcaption></figure>'
+    if e['proj']: figs+=f'<figure><img src="{e["proj"]}" alt="Конечная 3D-форма {esc(e["title"])}"><figcaption>Конечная 3D-форма после последней попытки: проекция вдоль наименьшей оси инерции, ближние участки желтее, дальние синее</figcaption></figure>'
     facts=[]
-    if e['group']=='kl': facts.append(('орбита R3 (BFS)', f'{e["klOrbit"]} диаграмм'))
-    elif c: facts.append(('орбита R3 (BFS, предел 3000)', f'{c.get("orbit")}{"+" if c.get("orbitTruncated") else ""} диаграмм'))
+    if c:
+        facts.append(('орбита R3 (BFS, предел 3000)', f'{c.get("orbit")}{"+" if c.get("orbitTruncated") else ""} диаграмм, с ходом R1/R2: {c.get("orbitReducibleCount")}'))
+        st=c.get('simplifyStats') or {}
+        facts.append(('simplify() Regina (R1–R3), лучший из 3', f'{c.get("crossings")} → {c.get("simplifyTo")} пересечений'))
+        if st: facts.append((f'simplify() × {st["runs"]}: до нуля / минимум / медиана', f'{st["zeros"]} / {st["min"]} / {st["median"]}'))
     if r:
         if 'matched' in r: facts.append(('импорт из PD-кода', f'{r["matched"]}/{r["expectCrossings"]} пересечений совпали, det {r["det"]}'))
         if 'det2d' in r: facts.append(('импорт картинки', f'{r["nc"]} пересечений, det {r["det2d"]}, белых кружков {r["pending"]}'))
@@ -194,9 +222,9 @@ def table():
         cert=('тривиальный' if c.get('solidTorus') else ('нетривиальный' if c.get('solidTorus') is False else '—'))
         res=('окружность' if e['ok'] else ('нет' if e['run'] else '—'))
         cls='ok' if e['ok'] else ('ctl' if e['group']=='control' else 'bad')
-        k=(e['tries'][-1]['at'] if e['tries'] else '—')
+        k=(e['tries'][-1]['at'] if (e['ok'] and e['tries']) else '—')
         rows.append(f'<tr><td class="name"><a href="#{e["key"]}">{esc(e["title"])}</a></td><td>{esc(e["source"].split("·")[0].split(":")[0].strip())}</td>'
-                    f'<td class="num">{c.get("crossings") or e["nc"] or "—"}</td><td>{cert}</td><td>{esc(e["hardness"])}</td>'
+                    f'<td class="num">{c.get("crossings") or e["nc"] or "—"}</td><td>{cert}</td><td class="hard">{esc(hardness_short(c))}</td>'
                     f'<td><span class="pill {cls}">{res}</span></td><td class="num">{k}</td><td class="num">{e["bestRad"] if e["bestRad"] is not None else "—"}</td><td class="num">{e["sec"] if e["sec"] is not None else "—"}</td></tr>')
     return ('<div class="tablewrap"><table><thead><tr><th>диаграмма</th><th>откуда</th><th class="num">пересечений</th><th>тип (Regina)</th><th>трудность</th><th>итог</th>'
             '<th class="num">попытка, на которой распрямился</th><th class="num">лучший разброс радиусов</th><th class="num">время, с</th></tr></thead><tbody>'+''.join(rows)+'</tbody></table></div>')
@@ -222,19 +250,19 @@ page=f"""<title>Трудные тривиальные узлы</title>
 
 <h2>Что и как проверялось</h2>
 <p><b>Алгоритм.</b> Диаграмма строится в 2D-окне программы, затем Physics: релаксация упругой трубки в 3D (L-BFGS, жёсткость на изгиб Bend&nbsp;9, толщина Thick&nbsp;1, отталкивание Repel&nbsp;1) до остановки или до бюджета 30&nbsp;000 шагов. Если окружность не получилась — Stir (разжатие тугих контактов и переотжиг) и снова Physics, до 10 раз: всего 11 попыток. Критерий окружности как в 100-узловом тесте: разброс радиусов (max&nbsp;−&nbsp;min)/средний&nbsp;&lt;&nbsp;0.08 и «плоскость» (корень из наименьшего момента инерции / средний радиус)&nbsp;&lt;&nbsp;0.05.</p>
-<p><b>Импорт без распознавания.</b> Диаграммы из Regina и семейства Кауфмана–Ламбропулу заданы PD-кодом; плоская укладка — ортогональная укладка spherogram, по ней в программе строится замкнутая кривая, и каждому пересечению PD-кода назначается проход. Совпадение проверено дважды: число и положение пересечений (все совпали, det&nbsp;=&nbsp;1), и обратно — PD-код, снятый с диаграммы программы, даёт в Regina ту же сигнатуру, что исходный. Рисунок узла Хакена импортирован как картинка (кнопка Image): {hp and hp["nc"]} пересечений, det&nbsp;1, и его PD-код тоже совпал по сигнатуре с Gordian из Regina — то есть с рисунка снята ровно диаграмма Хакена.</p>
-<p><b>Сертификация.</b> Тривиальность каждой диаграммы подтверждена в Regina 7.4: дополнение узла — полноторие (<code>complement().isSolidTorus()</code>). Трудность измерена там же: нет ходов R1/R2 (<code>hasR1</code>, <code>hasR2</code> по всем пересечениям и дугам) и обход орбиты ходов R3 (число пересечений не меняется): если орбита состоит из одной диаграммы, ходов R3 нет вообще — самое строгое определение Кауфмана–Ламбропулу; если в орбите нашлась диаграмма с ходом R1/R2, трудность слабая — упрощение возможно без роста числа пересечений.</p>
+<p><b>Импорт без распознавания.</b> Диаграммы из Regina и семейства Кауфмана–Ламбропулу заданы PD-кодом; плоская укладка — ортогональная укладка spherogram, по ней в программе строится замкнутая кривая, и каждому пересечению PD-кода назначается проход. Совпадение проверено дважды: число и положение пересечений (все совпали, det&nbsp;=&nbsp;1), и обратно — PD-код, снятый с диаграммы программы, даёт в Regina ту же сигнатуру, что исходный. Рисунок узла Хакена импортирован как картинка (кнопка Image): {hp and hp["nc"]} пересечений, det&nbsp;1, и его PD-код совпал по сигнатуре с Gordian из Regina (сравнение без отражения: те же проходы, не зеркало) — то есть с рисунка снята ровно диаграмма Хакена.</p>
+<p><b>Сертификация.</b> Тривиальность каждой диаграммы подтверждена в Regina 7.4: дополнение узла — полноторие (<code>complement().isSolidTorus()</code>). Трудность измерена там же: нет ходов R1/R2 (<code>hasR1</code>, <code>hasR2</code> по всем пересечениям и дугам) и обход в ширину всей орбиты ходов R3 (число пересечений не меняется; предел 3000 диаграмм): если орбита состоит из одной диаграммы, ходов R3 нет вообще — самое строгое определение Кауфмана–Ламбропулу; если орбита обойдена целиком и упрощаемых в ней нет — без роста числа пересечений диаграмму не упростить; если в орбите есть диаграммы с ходом R1/R2, трудность слабая. Для больших орбит (обход обрезан) решает <code>simplify()</code> Regina — только ходы R1–R3: если она уменьшает число пересечений, диаграмма слабо трудная.</p>
 
 <h2>Сводка</h2>
 {table()}
 <p class="note" style="margin-top:10px">Попытка 0 — только Physics; попытка k — после k Stir. Лучший разброс радиусов — минимум по попыткам (порог 0.08). Время — весь прогон в Node без воркеров и без WebAssembly-ядра в фоне.</p>
 
 <h2>Из литературы</h2>
-<p>В офлайн-окружении доступны две именные диаграммы из Regina (Monster и Gordian unknot Хакена); остальное прислано пользователем картинками и импортировано кнопкой Image: два рисунка узла Хакена (оба совпали с Gordian из Regina по сигнатуре — то есть с рисунков снята ровно диаграмма Хакена, включая все проходы), два рисунка Очиаи (16 и 45 пересечений, как в подписи к рисунку) и ортогональная укладка на 43 пересечения. Три укладки узла Хакена в программе лежат по-разному, поэтому прогнаны все.</p>
+<p>В офлайн-окружении доступны две именные диаграммы из Regina (Monster и Gordian unknot Хакена); остальное прислано пользователем картинками и импортировано кнопкой Image: два рисунка узла Хакена (оба совпали с Gordian из Regina по сигнатуре без отражения — то есть с рисунков снята ровно диаграмма Хакена с теми же проходами; см. подписи в карточках), два рисунка Очиаи (16 и 45 пересечений, как в подписи к рисунку) и ортогональная укладка на 43 пересечения. Три укладки узла Хакена в программе лежат по-разному, поэтому прогнаны все.</p>
 <div class="cards">{''.join(card(e) for e in lit)}</div>
 
 <h2>Семейство Кауфмана–Ламбропулу</h2>
-<p>Статья «Hard unknots and collapsing tangles» даёт правило: если рациональные сплетения [p/q] и [r/s] удовлетворяют ps&nbsp;+&nbsp;qr&nbsp;=&nbsp;±1, то числительное замыкание их суммы N([p/q]&nbsp;+&nbsp;[r/s]) — тривиальный узел, а при подходящих знаках диаграмма трудная. Перебор всех дробей с |p|,|q|,|r|,|s|&nbsp;≤&nbsp;9 (сплетения строит spherogram, {S.get('tested','?')} замыканий проверено) дал {len(kl)} различных трудных диаграмм от 7 до 15 пересечений: {strongN} строго трудных (ходов R3 нет) и {weakN} слабо трудных. Все сертифицированы в Regina. Сопоставить их с конкретными рисунками статьи (например «Culprit» на 10 пересечениях) без её текста нельзя, поэтому они названы по дробям.</p>
+<p>Статья «Hard unknots and collapsing tangles» даёт правило: если рациональные сплетения [p/q] и [r/s] удовлетворяют ps&nbsp;+&nbsp;qr&nbsp;=&nbsp;±1, то числительное замыкание их суммы N([p/q]&nbsp;+&nbsp;[r/s]) — тривиальный узел, а при подходящих знаках диаграмма трудная. Перебор всех дробей с |p|,|q|,|r|,|s|&nbsp;≤&nbsp;{S.get('params',{}).get('max','?')} (сплетения строит spherogram, {S.get('tested','?')} замыканий проверено) дал {len(kl)} различных трудных диаграмм от {min((e['cert'] or {}).get('crossings',0) for e in kl) if kl else '?'} до {max((e['cert'] or {}).get('crossings',0) for e in kl) if kl else '?'} пересечений: {strongN} строго трудных (на диаграмме нет ни одного хода R3 — проверено <code>hasR3</code> по всем дугам) и {weakN} слабо трудных (в орбите R3 есть упрощаемые диаграммы; simplify() Regina распутывает их до нуля пересечений). Все сертифицированы в Regina. Сопоставить их с конкретными рисунками статьи (например «Culprit» на 10 пересечениях) без её текста нельзя, поэтому они названы по дробям.</p>
 <div class="cards">{''.join(card(e) for e in kl)}</div>
 
 <h2>Контроль</h2>
@@ -254,7 +282,7 @@ page=f"""<title>Трудные тривиальные узлы</title>
 <h2>Как воспроизвести</h2>
 <pre><code>cd test && pip install regina spherogram          # один раз (в облаке уже стоят)
 python3 pd2plink.py monster gordian gst              # укладки из Regina → out/hard/&lt;name&gt;.json
-python3 klhard.py                                    # семейство Кауфмана–Ламбропулу → out/hard/kl_*.json, kl_summary.json
+KL_MAX=9 KL_MAXC=16 KL_KEEP=20 python3 klhard.py     # семейство Кауфмана–Ламбропулу → out/hard/kl_*.json, kl_summary.json
 for k in monster gordian gst kl_m4_3_5_4; do          # прогон одной диаграммы: импорт, PNG, Physics + до 10 Stir, проекция
   UK_VERBOSE=1 HK_RUN=1 HK_FILE=out/hard/$k.json UK_STIR=10 HK_PNG=out/hard/$k.png HK_PROJ=out/hard/proj_$k.png \\
   KNOT_CANVAS=canvas2d.js node harness.js pdknot.js &gt; out/hard/run_$k.json; done
@@ -265,6 +293,9 @@ python3 hardreport.py                                # этот отчёт → o
 </div>
 """
 os.makedirs(OUT, exist_ok=True)
-open(f'{OUT}/report.html','w',encoding='utf8').write(page)
+open(f'{OUT}/report_artifact.html','w',encoding='utf8').write(page)   # для публикации артефактом Claude (обёртку добавляет платформа)
+head,body=page.split('<div class="wrap">',1)
+open(f'{OUT}/report.html','w',encoding='utf8').write('<!doctype html>\n<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+    +head+'</head><body><div class="wrap">'+body+'</body></html>\n')   # автономный файл для локального просмотра
 print(json.dumps({'entries':len(entries),'unknots':len(unknots),'straight':len(straight),'stuck':[e['key'] for e in stuck],'norun':[e['key'] for e in norun],
                   'control':[(e['key'], e['ok']) for e in ctl],'bytes':len(page.encode())}, ensure_ascii=False))

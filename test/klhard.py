@@ -1,9 +1,9 @@
 # 4.14 (стенд): ТРУДНЫЕ ТРИВИАЛЬНЫЕ УЗЛЫ ПО КОНСТРУКЦИИ КАУФМАНА–ЛАМБРОПУЛУ («Hard unknots and collapsing tangles»):
 # N([p/q]+[r/s]) — числительное замыкание суммы двух рациональных сплетений; при |ps+qr|=1 это тривиальный узел.
 # Перебираем дроби, строим диаграмму (spherogram), сертифицируем тривиальность в Regina (дополнение — полноторие),
-# оставляем диаграммы без упрощающих ходов R1/R2 и меряем орбиту R3 (есть ли упрощаемая диаграмма без роста пересечений).
+# оставляем диаграммы без упрощающих ходов R1/R2 и меряем орбиту R3 (BFS: размер, сколько в ней упрощаемых) и simplify().
 # Пишет out/hard/kl_summary.json и out/hard/kl_<p>_<q>_<r>_<s>.json (укладки для pdknot.js; минус = m).
-# KL_MAX=<макс. |p|,|q|,|r|,|s|> (8), KL_MAXC=<макс. пересечений> (14), KL_ORBIT=<предел BFS по R3> (3000), KL_KEEP=<сколько экспортировать> (12)
+# KL_MAX=<макс. |p|,|q|,|r|,|s|> (8), KL_MAXC=<макс. пересечений> (14), KL_ORBIT=<предел обхода орбиты R3> (3000), KL_KEEP=<сколько экспортировать> (12)
 import os, json, time, math, sys
 import regina, spherogram
 from spherogram import RationalTangle
@@ -11,7 +11,7 @@ from pd2plink import export
 
 MAXF=int(os.environ.get('KL_MAX',8)); MAXC=int(os.environ.get('KL_MAXC',14)); ORB=int(os.environ.get('KL_ORBIT',3000)); KEEP=int(os.environ.get('KL_KEEP',12))
 
-from reglib import noR12, r3orbit
+from reglib import noR12, r3orbit, simplify_to
 
 fr=[(p,q) for q in range(1,MAXF+1) for p in range(-MAXF,MAXF+1) if math.gcd(abs(p),q)==1]
 t0=time.time(); tested=0; unknots=0; hard=[]; seenSig=set(); notcert=0
@@ -34,11 +34,11 @@ for i,(p,q) in enumerate(fr):
         seenSig.add(sig)
         if not L.complement().isSolidTorus(): notcert+=1; continue
         unknots+=1
-        size,red,trunc=r3orbit(L, ORB)
-        hard.append({'p':p,'q':q,'r':r,'s':s,'crossings':n,'pd':[list(t) for t in pd],'sig':sig,'orbit':size,'orbitReducible':red,'orbitTruncated':trunc})
-        print(f'hard {n}c  N([{p}/{q}]+[{r}/{s}])  orbit {size}{"+" if trunc else ""} reducible={red}', file=sys.stderr)
+        size,red,trunc,r3m=r3orbit(L, ORB); simp=simplify_to(L)
+        hard.append({'p':p,'q':q,'r':r,'s':s,'crossings':n,'pd':[list(t) for t in pd],'sig':sig,'orbit':size,'orbitReducible':red>0,'orbitReducibleCount':red,'orbitTruncated':trunc,'r3moves':r3m,'simplifyTo':simp})
+        print(f'hard {n}c  N([{p}/{q}]+[{r}/{s}])  orbit {size}{"+" if trunc else ""} reducible={red} R3moves={r3m} simplify→{simp}', file=sys.stderr)
 hard.sort(key=lambda h:(h['orbitReducible'], h['crossings'], h['orbit']))
-strong=[h for h in hard if not h['orbitReducible']]
+strong=[h for h in hard if h['r3moves']==0]
 print(f'fractions {len(fr)} tested {tested} certified-hard {unknots} (strong {len(strong)}) not-certified {notcert} {time.time()-t0:.1f}s', file=sys.stderr)
 os.makedirs('out/hard', exist_ok=True)
 exported=[]
