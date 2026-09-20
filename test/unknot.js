@@ -12,7 +12,7 @@
 //            UK_THICK/UK_REP/UK_BEND (ползунки), UK_VERBOSE=1 (ход прогона)
 (async ()=>{ const H=global.__H; window.__noAutoSave=true; window.__noWorkers=true; window.__noAutoThick=true;
   const NK=+(process.env.UK_N||3), CT=+(process.env.UK_C||40), SEED0=+(process.env.UK_SEED0||1);
-  const NSTIR=+(process.env.UK_STIR||10), BUD=+(process.env.UK_BUD||60000), VERB=process.env.UK_VERBOSE==='1';
+  const NSTIR=+(process.env.UK_STIR||10), BUD=+(process.env.UK_BUD||30000)   // 4.11: 30 000 — ползущая попытка отдаётся Stir, а не ждёт часами (замер 2026-09-19), VERB=process.env.UK_VERBOSE==='1';
   const RADT=+(process.env.UK_RAD||0.08), FLATT=+(process.env.UK_FLAT||0.05);
   let _s=1; const rnd=()=>{ _s=(Math.imul(_s,1103515245)+12345)&0x7fffffff; return _s/0x7fffffff; };
 
@@ -63,16 +63,14 @@
       finishCurve(true, true); return crossings.length; };
     // число пересечений растёт примерно как квадрат наивысшей гармоники: ищем K пополам, затем из
     // нескольких кривых с этим K берём ту, что ближе к цели (кривые случайные, разброс заметный)
-    let lo=2, hi=110, K=8;
-    for(let it=0; it<8 && lo<=hi; it++){ K=Math.round((lo+hi)/2);
-      let nc=0; for(let r=0;r<2;r++) nc=Math.max(nc, build(K));
-      if(nc<target) lo=K+1; else hi=K-1; }
-    K=Math.max(2, Math.round((lo+hi)/2));
-    let bestK=K, bestNc=0, bestSeed=0;
-    for(let t=0;t<10;t++){ const sd=_s, nc=build(K);
-      if(!bestNc || Math.abs(nc-target)<Math.abs(bestNc-target)){ bestNc=nc; bestSeed=sd; }
-      if(Math.abs(nc-target)<=Math.max(2, 0.05*target)) break; }
-    _s=bestSeed; raw=fitToCanvas(wiggly(K, AMP), 0.92, true); closedCurve=false; drawing=false; finishCurve(true, false);
+    // одна и та же кривая (зерно s0) на всех K — число пересечений растёт с K монотонно, ищем пополам
+    const s0=_s, buildAt=(K)=>{ _s=s0; return build(K); };
+    let lo=3, hi=130, bestK=3, bestNc=0;
+    while(lo<=hi){ const K=(lo+hi)>>1, nc=buildAt(K);
+      if(!bestNc || Math.abs(nc-target)<Math.abs(bestNc-target)){ bestNc=nc; bestK=K; }
+      if(nc===target) break; if(nc<target) lo=K+1; else hi=K-1; }
+    const K=bestK, bestSeed=s0;
+    _smoothCap=3000; _s=bestSeed; raw=fitToCanvas(wiggly(K, AMP), 0.92, true); closedCurve=false; drawing=false; finishCurve(true, false);
     for(const c of crossings){ c.over=(c.sA<c.sB)? 'A':'B'; c.pending=false; }   // НИСХОДЯЩЕ ⇒ тривиальный узел
     updateCrossInfo(); updateKnotType();
     return {nc:crossings.length, K, det:knotDet, isUnknot}; }
