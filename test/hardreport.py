@@ -15,14 +15,15 @@ def b64(f):
 def esc(s): return html.escape(str(s), quote=True)
 
 # ---------- сертификация (кэш) ----------
-def certify(key, pd, compare=None):
+def certify(key, pd, compare=None, example=None):
     cache=load(f'{OUT}/cert.json') or {}
-    if key in cache or NOREG or not pd: return cache.get(key)
+    if key in cache or NOREG or not (pd or example): return cache.get(key)
     import regina
-    from reglib import from_pd, noR12, r3orbit
-    L=from_pd(pd); t=time.time()
+    from reglib import from_pd, noR12, r3orbit, solid_torus
+    # узлы Regina берём из ExampleLink: та же диаграмма, но isSolidTorus() на триангуляции из fromPD может считать в сотни раз дольше
+    L=getattr(regina.ExampleLink, example)() if example else from_pd(pd); t=time.time()
     rec={'crossings':L.size(), 'comps':L.countComponents()}
-    rec['solidTorus']=L.complement().isSolidTorus() if rec['comps']==1 else None
+    rec['solidTorus']=solid_torus(L, timeout=int(os.environ.get('HR_ST_TIMEOUT',180))) if rec['comps']==1 else None
     rec['noR12']=noR12(L)
     size,red,trunc=r3orbit(L, 3000); rec.update(orbit=size, orbitReducible=red, orbitTruncated=trunc)
     if compare: rec['sameAs'+compare]=(L.sig()==getattr(regina.ExampleLink, compare)().sig())
@@ -40,11 +41,18 @@ def run_of(key):
 def frac(p,q): return f'{p}/{q}'.replace('-','−')
 entries=[]
 J=load(f'{OUT}/monster.json'); entries.append(dict(key='monster', group='lit', title='Monster', sub='«монстр», 10 пересечений',
-    source='Regina 7.4 · ExampleLink.monster()', pd=J and J['pd']))
+    source='Regina 7.4 · ExampleLink.monster()', pd=J and J['pd'], example='monster'))
 J=load(f'{OUT}/gordian.json'); entries.append(dict(key='gordian', group='lit', title='Gordian unknot', sub='узел Хакена, 141 пересечение',
-    source='Regina 7.4 · ExampleLink.gordian()', pd=J and J['pd']))
+    source='Regina 7.4 · ExampleLink.gordian()', pd=J and J['pd'], example='gordian'))
 P=load(f'{OUT}/pd_hakenpic.json'); entries.append(dict(key='hakenpic', group='lit', title='Узел Хакена — рисунок', sub='картинка пользователя 918×782, импорт кнопкой Image',
     source='рисунок с диска → распознавание (тот же путь, что Upload)', pd=P and P.get('pd'), compare='gordian'))
+for key,title,sub,cmp_ in (
+    ('u1_thick','Узел Хакена — рисунок 2','вторая картинка пользователя, толстые линии, 1140×1080',"gordian"),
+    ('u2a_ochiai16','Узел Очиаи, 16 пересечений','рисунок из статьи Очиаи (левая половина присланного кадра, увеличена вдвое)',None),
+    ('u2b_ochiai45','Узел Очиаи, 45 пересечений','рисунок из статьи Очиаи (правая половина присланного кадра, увеличена вдвое)',None),
+    ('u3_ortho','Ортогональная укладка, 43 пересечения','картинка пользователя; какой это узел из литературы — не названо',None)):
+    P=load(f'{OUT}/pd_{key}.json')
+    if P: entries.append(dict(key=key, group='lit', title=title, sub=sub, source='рисунок с диска → распознавание (тот же путь, что Upload)', pd=P.get('pd'), compare=cmp_))
 S=load(f'{OUT}/kl_summary.json') or {'hard':[]}
 for h in S['hard']:
     if 'name' not in h: continue
@@ -52,10 +60,10 @@ for h in S['hard']:
         source='Kauffman–Lambropoulou: числительное замыкание суммы двух рациональных сплетений, ps + qr = ±1', pd=h['pd'],
         klOrbit=h['orbit'], klRed=h['orbitReducible']))
 J=load(f'{OUT}/gst.json'); entries.append(dict(key='gst', group='control', title='GST', sub='Гомпф–Шарлеманн–Томпсон, 48 пересечений — НЕ тривиальный узел',
-    source='Regina 7.4 · ExampleLink.gst()', pd=J and J['pd']))
+    source='Regina 7.4 · ExampleLink.gst()', pd=J and J['pd'], example='gst'))
 
 for e in entries:
-    e['run']=run_of(e['key']); e['cert']=certify(e['key'], e.get('pd'), e.get('compare'))
+    e['run']=run_of(e['key']); e['cert']=certify(e['key'], e.get('pd'), e.get('compare'), e.get('example'))
     e['img']=b64(f'{OUT}/{e["key"]}.png'); e['proj']=b64(f'{OUT}/proj_{e["key"]}.png')
     r=e['run']; e['ok']=bool(r and r.get('ok')); e['tries']=(r or {}).get('tries') or []
     e['bestRad']=min([t['rad'] for t in e['tries']], default=None)
@@ -76,8 +84,8 @@ today=time.strftime('%Y-%m-%d')
 CSS=r"""
 :root{--bg:#f4f8f8;--card:#ffffff;--ink:#16262b;--ink2:#54696e;--line:#d3dfe1;--acc:#177f8b;--accbg:#e0f2f4;--ok:#2c7a4b;--okbg:#e2f3e8;--bad:#b04429;--badbg:#f9e7e0;--ctl:#6f55a8;--ctlbg:#ebe5f7;--paper:#ffffff;
  --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;--serif:'Literata',Georgia,'Times New Roman',serif;--mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f191c;--card:#15232700;--ink:#e3ecee;--ink2:#9fb2b6;--line:#2b3d42;--acc:#5fd0da;--accbg:#163338;--ok:#72cf9a;--okbg:#173427;--bad:#f0906f;--badbg:#3a2119;--ctl:#b9a2f2;--ctlbg:#2a2140;--paper:#f6f8f8}}
-:root[data-theme="dark"]{--bg:#0f191c;--card:#15232700;--ink:#e3ecee;--ink2:#9fb2b6;--line:#2b3d42;--acc:#5fd0da;--accbg:#163338;--ok:#72cf9a;--okbg:#173427;--bad:#f0906f;--badbg:#3a2119;--ctl:#b9a2f2;--ctlbg:#2a2140;--paper:#f6f8f8}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f191c;--card:#152327;--ink:#e3ecee;--ink2:#9fb2b6;--line:#2b3d42;--acc:#5fd0da;--accbg:#163338;--ok:#72cf9a;--okbg:#173427;--bad:#f0906f;--badbg:#3a2119;--ctl:#b9a2f2;--ctlbg:#2a2140;--paper:#f6f8f8}}
+:root[data-theme="dark"]{--bg:#0f191c;--card:#152327;--ink:#e3ecee;--ink2:#9fb2b6;--line:#2b3d42;--acc:#5fd0da;--accbg:#163338;--ok:#72cf9a;--okbg:#173427;--bad:#f0906f;--badbg:#3a2119;--ctl:#b9a2f2;--ctlbg:#2a2140;--paper:#f6f8f8}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
 .wrap{max-width:1080px;margin:0 auto;padding-inline:20px;padding-block:32px 64px}
@@ -220,7 +228,7 @@ page=f"""<title>Трудные тривиальные узлы</title>
 <p class="note" style="margin-top:10px">Попытка 0 — только Physics; попытка k — после k Stir. Лучший разброс радиусов — минимум по попыткам (порог 0.08). Время — весь прогон в Node без воркеров и без WebAssembly-ядра в фоне.</p>
 
 <h2>Из литературы</h2>
-<p>В офлайн-окружении доступны две именные диаграммы из Regina (Monster и Gordian unknot Хакена) и рисунок узла Хакена, присланный пользователем. Обе диаграммы Хакена — одна и та же по сигнатуре, но в программе они лежат по-разному (ортогональная укладка против рисунка от руки), поэтому прогнаны обе.</p>
+<p>В офлайн-окружении доступны две именные диаграммы из Regina (Monster и Gordian unknot Хакена); остальное прислано пользователем картинками и импортировано кнопкой Image: два рисунка узла Хакена (оба совпали с Gordian из Regina по сигнатуре — то есть с рисунков снята ровно диаграмма Хакена, включая все проходы), два рисунка Очиаи (16 и 45 пересечений, как в подписи к рисунку) и ортогональная укладка на 43 пересечения. Три укладки узла Хакена в программе лежат по-разному, поэтому прогнаны все.</p>
 <div class="cards">{''.join(card(e) for e in lit)}</div>
 
 <h2>Семейство Кауфмана–Ламбропулу</h2>
@@ -236,7 +244,7 @@ page=f"""<title>Трудные тривиальные узлы</title>
 <ul>
 <li><b>Узел Гёрица</b> (Goeritz, 1934), 11 пересечений — исторически первый трудный тривиальный узел.</li>
 <li><b>Узел Тислтуэйта</b> (Thistlethwaite), 15 пересечений.</li>
-<li><b>Узел Очиаи</b> (Ochiai, 1990) и <b>узел Фридмана</b> (Freedman).</li>
+<li><b>Узел Фридмана</b> (Freedman); узлы Очиаи пользователь прислал картинкой — они в отчёте.</li>
 <li>Именные примеры Кауфмана–Ламбропулу (Culprit и другие): их семейство воспроизведено по конструкции статьи, но какие именно дроби стоят за рисунками статьи — не проверить.</li>
 </ul>
 <p>Любую из этих диаграмм можно добавить двумя способами: прислать картинку диаграммы (импорт картинки точен — рисунок Хакена совпал с Regina по сигнатуре) или PD-код — тогда <code>pdknot.js</code> построит её без распознавания. Прогон одной диаграммы занимает секунды на малых узлах и до 10 минут на 141 пересечении.</p>

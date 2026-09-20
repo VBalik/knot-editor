@@ -33,3 +33,24 @@ def r3orbit(L0, limit=3000):
                         q.append(M)
                         if len(seen)>=limit: return len(seen), False, True
     return len(seen), False, False
+
+def _st_worker(pd, simplify, q):
+    import regina
+    L=from_pd(pd)
+    if simplify: L.simplify()          # тот же узел, меньше пересечений → триангуляция меньше
+    q.put(bool(L.complement().isSolidTorus()))
+
+def solid_torus(L, timeout=120, tries=3):
+    """Тривиальность узла: дополнение — полноторие. isSolidTorus() рандомизирован и на некоторых триангуляциях
+    (Gordian из ExampleLink) может не заканчиваться, поэтому считаем в дочернем процессе с таймаутом, сначала на
+    диаграмме, упрощённой simplify() (узел тот же), при неудаче повторяем. → True/False, None — не удалось за tries попыток."""
+    import multiprocessing as mp, time
+    pd=[list(t) for t in L.pdData()]
+    ctx=mp.get_context('fork')
+    for k in range(tries):
+        q=ctx.Queue(); p=ctx.Process(target=_st_worker, args=(pd, True, q)); t=time.time(); p.start()
+        p.join(timeout)
+        if p.is_alive(): p.terminate(); p.join(); continue
+        try: return q.get(timeout=5)
+        except Exception: continue
+    return None
