@@ -25,3 +25,6 @@ publish.zip
 .TemporaryItems
 .tmp.drive*
 *conflicted copy*
+
+# Python bytecode (test/klhard.py, hardreport.py)
+__pycache__/

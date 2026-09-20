@@ -1,7 +1,8 @@
 // 4.13: ГИПОТЕЗА НА РИСУНКЕ. Картинка с диска (IK_IMG) → распознавание тем же путём, что кнопка Upload → проверка,
 // что диаграмма импортирована как одна кривая с det = 1 (тривиальный узел из литературы) → Physics, при неудаче
 // Stir до UK_STIR раз → окружность? Критерий и счётчики — как в unknot.js. Параметры: IK_IMG, UK_STIR (10),
-// UK_BUD (30000 шагов на попытку), UK_THICK/UK_REP/UK_BEND (ползунки, физические значения), UK_VERBOSE=1
+// UK_BUD (30000 шагов на попытку), UK_THICK/UK_REP/UK_BEND (ползунки, физические значения), UK_VERBOSE=1,
+// HK_SAVE=<json> — конечные 3D-точки, HK_PROJ=<png> — проекция конечной 3D-формы (proj3d.js), HK_PDONLY=1 — только импорт и PD-код
 (async ()=>{ const fs=__require('fs'), path=__require('path'), mod=(n)=>__require(path.join(process.cwd(),'node_modules',n));
   const H=global.__H; window.__noAutoSave=true; window.__noWorkers=true; window.__noAutoThick=true;
   const src=process.env.IK_IMG; if(!src) throw new Error('set IK_IMG=<image .png|.jpg>');
@@ -46,6 +47,8 @@
   const t0=Date.now(), res=ikRecognize({width:W, height:Hh, data}), ap=ikApply(res);
   const rec={file:path.basename(src), nc:crossings.length, det2d:knotDet, comps:res.notes&&res.notes.comps, pending:pendingCount(), importOk:!!(ap&&ap.ok) && knotDet===1 && (res.notes? res.notes.comps===1 : true) && pendingCount()===0, tries:[]};
   if(!rec.importOk){ rec.ok=false; rec.err='import not exact (need one curve, det 1, no pending crossings)'; return rec; }
+  rec.pd=__require(path.join(process.cwd(),'pdcode.js'))(crossings);   // PD-код импортированной диаграммы (сертификация в Regina, hardreport.py)
+  if(process.env.HK_PDONLY==='1'){ rec.ok=null; return rec; }   // только импорт и PD-код, без физики
   H.set({ms:1}); H.play();
   let done=false;
   for(let attempt=0; attempt<=NSTIR; attempt++){
@@ -57,4 +60,6 @@
     if(attempt===NSTIR) break;
     if(H.running()) H.play(); if(!window.__knotStir()) break; while(_stir) window.__knotStir(); }
   rec.ok=done; rec.N=N; rec.det3dEnd=_detRobust(3); rec.sec=+((Date.now()-t0)/1000).toFixed(1);
+  if(process.env.HK_SAVE){ fs.mkdirSync(path.dirname(process.env.HK_SAVE),{recursive:true}); fs.writeFileSync(process.env.HK_SAVE, JSON.stringify({name:rec.file, N, verts:verts.map(v=>[+v.x.toFixed(4),+v.y.toFixed(4),+v.z.toFixed(4)])})); rec.saved=process.env.HK_SAVE; }
+  if(process.env.HK_PROJ){ try{ rec.proj=__require(path.join(process.cwd(),'proj3d.js'))(verts, jacobiEig, process.env.HK_PROJ, +(process.env.HK_PROJ_W||480)); }catch(e){ rec.projErr=String(e).slice(0,120); } }
   return rec; })()
