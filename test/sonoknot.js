@@ -84,7 +84,9 @@
     if(D>Dcap) break;
     if(it%100===0){ const r=roundness(); const rec={it, D_L0:+(D/L0).toFixed(3), worst_D:+(r0.worst/D).toFixed(3), pairs:r0.npairs, stall, rejected, ...r, det:_detRobust(3), sec:+((Date.now()-t0)/1000).toFixed(0)}; log.push(rec); if(process.env.UK_VERBOSE==='1') console.error(J.name, JSON.stringify(rec)); if(r.rad<0.08 && r.flat<0.05) break; }
   }
-  recenter(); const r=roundness(); out.sono=Object.assign(out.sono, {iters:it, rejected, D_L0:+(D/L0).toFixed(2), det3d:_detRobust(3), ...r, sec:+((Date.now()-t0)/1000).toFixed(0), log});
+  recenter();
+  if(process.env.SN_POLISH==='1'){ _inflate=1; _energyDirty=true; _ePrev=-1; H.play(); let st=0, o=null; while(true){ o=H.step(200); st+=200; if(!o.running || st>=+(process.env.UK_BUD||30000)) break; } if(H.running()) H.play(); out.polishSteps=st; }   // доводка обычной физикой
+  const r=roundness(); out.sono=Object.assign(out.sono, {iters:it, rejected, D_L0:+(D/L0).toFixed(2), det3d:_detRobust(3), ...r, sec:+((Date.now()-t0)/1000).toFixed(0), log});
   out.ok=r.rad<0.08 && r.flat<0.05; out.N=N;
   if(process.env.HK_SAVE){ fs.writeFileSync(process.env.HK_SAVE, JSON.stringify({name:J.name, N, verts:verts.map(v=>[+v.x.toFixed(4),+v.y.toFixed(4),+v.z.toFixed(4)])})); }
   if(process.env.HK_PROJ){ try{ out.proj=__require(path.join(process.cwd(),'proj3d.js'))(verts, jacobiEig, process.env.HK_PROJ, 480); }catch(e){ out.projErr=String(e).slice(0,120); } }
