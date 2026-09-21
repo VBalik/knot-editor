@@ -10,7 +10,8 @@
 // Успех = настоящая окружность: разброс радиусов < UK_RAD и толщина вдоль наименьшей главной оси < UK_FLAT.
 // Параметры: UK_N (узлов), UK_C (пересечений), UK_SEED0, UK_STIR (попыток Stir), UK_BUD (шагов на попытку),
 //            UK_THICK/UK_REP/UK_BEND (ползунки), UK_VERBOSE=1 (ход прогона)
-(async ()=>{ const H=global.__H; window.__noAutoSave=true; window.__noWorkers=true; window.__noAutoThick=true;
+(async ()=>{ if(process.env.HK_ANN) window.__ann=JSON.parse(process.env.HK_ANN);   // лаборатория отжига (annApply в index.html)
+ const H=global.__H; window.__noAutoSave=true; window.__noWorkers=true; window.__noAutoThick=true;
   const NK=+(process.env.UK_N||3), CT=+(process.env.UK_C||40), SEED0=+(process.env.UK_SEED0||1);
   const NSTIR=+(process.env.UK_STIR||10), BUD=+(process.env.UK_BUD||30000)   // 4.11: 30 000 — ползущая попытка отдаётся Stir, а не ждёт часами (замер 2026-09-19), VERB=process.env.UK_VERBOSE==='1';
   const RADT=+(process.env.UK_RAD||0.08), FLATT=+(process.env.UK_FLAT||0.05);
