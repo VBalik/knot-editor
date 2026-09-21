@@ -60,7 +60,7 @@
       const ev=Array.from(jacobiEig([[a/N,b/N,d/N],[b/N,e/N,f/N],[d/N,f/N,g/N]]).vals).sort((p,q)=>p-q); return {rad:+((mx-mn)/R).toFixed(4), flat:+(Math.sqrt(Math.max(0,ev[0]))/R).toFixed(4), E:isFinite(_ePrev)? +(+_ePrev).toPrecision(4) : null}; };
     if(process.env.HK_START){ H.play(); if(H.running()) H.play(); const S0=JSON.parse(fs.readFileSync(process.env.HK_START,'utf8'));   // продолжить с сохранённой 3D-формы (HK_SAVE прежнего прогона)
       _setVertsFrom(S0.verts.map(v=>new THREE.Vector3(v[0],v[1],v[2]))); recenter(); _fromLift=true; _liftFromDiagram=false; out.startedFrom=process.env.HK_START; }
-    const t0=Date.now(); H.set({ms:1}); H.play(); out.tries=[]; let done=false;
+    const t0=Date.now(); H.set({ms:1}); H.play(); out.tries=[]; let done=false; out.liftCheck=(typeof _liftCheck!=='undefined')? _liftCheck : null;   // 4.20: проверка лифта (mult, N, пересечения проекции, det)
     for(let attempt=0; attempt<=NSTIR; attempt++){
       let st=0, o=null; while(true){ o=H.step(200); st+=200; if(!o.running || st>=BUD) break; }
       const r=roundness(); out.tries.push({at:attempt, steps:st, settled:!o.running, rad:r.rad, flat:r.flat, E:r.E, det3d:_detRobust(3)});
