@@ -85,7 +85,8 @@
     const rec={i:q, nc:d.nc, K:d.K, det2d:d.det, unknot2d:d.isUnknot, tries:[]};
     if(!d.isUnknot){ rec.ok=false; rec.err='diagram not trivial'; out.push(rec); continue; }
     H.set({ms:1}); H.play();                     // лифт из диаграммы и физика
-    let done=false; let _trPrev=null; if(VERB){ const d0=_detRobust(3); console.error('   ', q, 'lift det3d', d0, 'det2d', knotDet, 'N', N); _trPrev={st:0, det:d0, v:verts.map(v=>[v.x,v.y,v.z])}; }
+    let done=false; let _trPrev=null; if(VERB){ const d0=_detRobust(3); console.error('   ', q, 'lift det3d', d0, 'det2d', knotDet, 'N', N); _trPrev={st:0, det:d0, v:verts.map(v=>[v.x,v.y,v.z])};
+      if(process.env.UK_DUMPLIFT && d0!==knotDet){ fs.writeFileSync(process.env.UK_DUMPLIFT+'_k'+q+'.json', JSON.stringify({q, det2d:knotDet, det3d:d0, N, L0, totalLen2D, smooth:smooth.map(p=>[p.x,p.y]), crossings:crossings.map(c=>({x:c.x,y:c.y,sA:c.sA,sB:c.sB,over:c.over})), verts:verts.map(v=>[v.x,v.y,v.z])})); console.error('   LIFT MISMATCH dumped'); } }
     for(let attempt=0; attempt<=NSTIR; attempt++){
       let st=0, o=null; const tP=Date.now();
       while(true){ o=H.step(200); st+=200;
