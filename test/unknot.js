@@ -13,7 +13,7 @@
 (async ()=>{ if(process.env.HK_ANN) window.__ann=JSON.parse(process.env.HK_ANN);   // лаборатория отжига (annApply в index.html)
  const H=global.__H; window.__noAutoSave=true; window.__noWorkers=true; window.__noAutoThick=true;
   const NK=+(process.env.UK_N||3), CT=+(process.env.UK_C||40), SEED0=+(process.env.UK_SEED0||1);
-  const NSTIR=+(process.env.UK_STIR||10), BUD=+(process.env.UK_BUD||30000)   // 4.11: 30 000 — ползущая попытка отдаётся Stir, а не ждёт часами (замер 2026-09-19), VERB=process.env.UK_VERBOSE==='1';
+  const NSTIR=+(process.env.UK_STIR||10), BUD=+(process.env.UK_BUD||30000), VERB=process.env.UK_VERBOSE==='1';   // 4.11: бюджет 30 000 — ползущая попытка отдаётся Stir, а не ждёт часами (замер 2026-09-19)
   const RADT=+(process.env.UK_RAD||0.08), FLATT=+(process.env.UK_FLAT||0.05);
   let _s=1; const rnd=()=>{ _s=(Math.imul(_s,1103515245)+12345)&0x7fffffff; return _s/0x7fffffff; };
 
