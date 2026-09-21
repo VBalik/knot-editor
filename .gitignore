@@ -28,6 +28,3 @@ publish.zip
 
 # Python bytecode (test/klhard.py, hardreport.py)
 __pycache__/
-
-# Knot film: кадры и ролики не для репозитория
-knot-film/out/
