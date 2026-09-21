@@ -84,6 +84,12 @@
     const t0=Date.now(), d=makeUnknot(CT);
     const rec={i:q, nc:d.nc, K:d.K, det2d:d.det, unknot2d:d.isUnknot, tries:[]};
     if(!d.isUnknot){ rec.ok=false; rec.err='diagram not trivial'; out.push(rec); continue; }
+    if(process.env.UK_LIFTONLY){   // 4.19: только лифты — K лифтов со случайными высотами на диаграмму, det лифта против det диаграммы (ловля неверного лифта)
+      const K=+(process.env.UK_LIFTONLY)||6; let seedL=SEED0*131+q; const rndL=()=>{ seedL=(Math.imul(seedL,1103515245)+12345)&0x7fffffff; return seedL/0x7fffffff; };
+      rec.lifts=[]; for(let k=0;k<K;k++){ liftFromDiagram(k===0? null : rndL); const dl=_detRobust(3); rec.lifts.push({k, N, det:dl});
+        if(dl!==knotDet && process.env.UK_DUMPLIFT){ fs.writeFileSync(process.env.UK_DUMPLIFT+'_k'+q+'_l'+k+'.json', JSON.stringify({q, k, det2d:knotDet, det3d:dl, N, L0, totalLen2D, smooth:smooth.map(p=>[p.x,p.y]), crossings:crossings.map(c=>({x:c.x,y:c.y,sA:c.sA,sB:c.sB,over:c.over})), verts:verts.map(v=>[v.x,v.y,v.z])})); } }
+      rec.badLifts=rec.lifts.filter(l=>l.det!==knotDet).length; rec.ok=rec.badLifts===0; if(VERB) console.error('   ', q, 'nc', d.nc, 'lifts', K, 'bad', rec.badLifts, rec.lifts.map(l=>l.det).join(','));
+      out.push(rec); continue; }
     H.set({ms:1}); H.play();                     // лифт из диаграммы и физика
     let done=false; let _trPrev=null; if(VERB){ const d0=_detRobust(3); console.error('   ', q, 'lift det3d', d0, 'det2d', knotDet, 'N', N); _trPrev={st:0, det:d0, v:verts.map(v=>[v.x,v.y,v.z])};
       if(process.env.UK_DUMPLIFT && d0!==knotDet){ fs.writeFileSync(process.env.UK_DUMPLIFT+'_k'+q+'.json', JSON.stringify({q, det2d:knotDet, det3d:d0, N, L0, totalLen2D, smooth:smooth.map(p=>[p.x,p.y]), crossings:crossings.map(c=>({x:c.x,y:c.y,sA:c.sA,sB:c.sB,over:c.over})), verts:verts.map(v=>[v.x,v.y,v.z])})); console.error('   LIFT MISMATCH dumped'); } }
