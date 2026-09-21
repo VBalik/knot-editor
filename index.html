@@ -2123,7 +2123,8 @@ function liftFromDiagram(rnd){   // лифт диаграммы; rnd — ген�
   // диаграммы; 4 из 240 лифтов на случайных диаграммах по 100 пересечений). Теперь после построения проекция сверяется
   // с диаграммой (число пересечений и det); при расхождении число вершин растёт ×1.25 (до ×3), берётся первый совпавший
   const N0=chooseN(L3); let liftOk=false; _liftCheck=null;
-  for(let mult=1; mult<=3.05 && !liftOk; mult*=1.25){
+  const maxMult=(typeof window!=='undefined' && window.__liftMaxMult>0)? window.__liftMaxMult : 3.05;   // стенд: 1 — без повторов
+  for(let mult=1; mult<=maxMult && !liftOk; mult*=1.25){
   N=Math.round(N0*mult);                // число вершин — по 3D-длине объёмного лифта (точность проекции диаграммы)
   const step3=L3/N;
   // 3D-дуговые позиции якорей (слившиеся ближе 0.05·шага — один якорь)
@@ -2151,18 +2152,24 @@ function liftFromDiagram(rnd){   // лифт диаграммы; rnd — ген�
   recenter();
   { let tl=0; for(let i=0;i<N;i++) tl+=verts[i].distanceTo(verts[(i+1)%N]); L0=tl/N; }
   updateGeomUnits();
-  { const kc=_projCrossCount(verts); const dz=(rnd && crossings.length && typeof knotDet==='number')? _detRobust(3) : null;   // det — только в попытках (в buildKnot3D knotDet ещё не пересчитан)
-    liftOk = kc===crossings.length && (dz===null || dz===knotDet);
-    _liftCheck={mult:+mult.toFixed(2), N, crossLift:kc, crossings:crossings.length, detZ:dz, det2d:knotDet, ok:liftOk}; }
+  // критерий — совпадение det (устойчивый, 3 проекции общего положения) с det диаграммы; det диаграммы считается здесь же
+  // (в buildKnot3D knotDet ещё не пересчитан). Число пересечений проекции — только справочно: на плотных случайных
+  // диаграммах хорды лифта срезают петли и касательные пары (103 → 93…100 при верном типе), поэтому оно в критерий не входит
+  { const kc=_projCrossCount(verts); const d2=crossings.length? computeDeterminant() : 1; const dz=crossings.length? _detRobust(3) : d2;
+    liftOk = (dz===d2);
+    _liftCheck={mult:+mult.toFixed(2), N, crossLift:kc, crossings:crossings.length, detZ:dz, det2d:d2, ok:liftOk}; }
   }
   return true;
 }
 let _liftCheck=null;   // 4.20: итог проверки последнего лифта ({mult, N, crossLift, crossings, detZ, det2d, ok}) — стенд и телеметрия
-function _projCrossCount(vs){   // число пересечений проекции замкнутой ломаной вдоль z (O(n²), только при построении лифта)
-  const n=vs.length; let k=0;
-  for(let i=0;i<n;i++){ const a=vs[i], b=vs[(i+1)%n], bx=b.x-a.x, by=b.y-a.y;
-    for(let j=i+2;j<n;j++){ if(i===0 && j===n-1) continue; const c=vs[j], d=vs[(j+1)%n], dx=d.x-c.x, dy=d.y-c.y, den=bx*dy-by*dx; if(Math.abs(den)<1e-14) continue;
-      const s=((c.x-a.x)*dy-(c.y-a.y)*dx)/den, u=((c.x-a.x)*by-(c.y-a.y)*bx)/den; if(s>0&&s<1&&u>0&&u<1) k++; } }
+function _projCrossCount(vs){   // число пересечений проекции замкнутой ломаной (O(n²), только при построении лифта)
+  // проекция вдоль z ВЫРОЖДЕНА: якоря ставят вершины обеих прядей ровно в точку пересечения, и тест «строго внутри отрезков»
+  // считает такое пересечение как повезёт (Гордиан: 136–139 из 141). Берём проекцию под крошечным общим наклоном — она общего положения
+  const n=vs.length, ex=1.3e-3, ey=0.7e-3, X=new Float64Array(n), Y=new Float64Array(n); let k=0;
+  for(let i=0;i<n;i++){ X[i]=vs[i].x+ex*vs[i].z; Y[i]=vs[i].y+ey*vs[i].z; }
+  for(let i=0;i<n;i++){ const i2=(i+1)%n, ax=X[i], ay=Y[i], bx=X[i2]-ax, by=Y[i2]-ay;
+    for(let j=i+2;j<n;j++){ if(i===0 && j===n-1) continue; const j2=(j+1)%n, cx=X[j], cy=Y[j], dx=X[j2]-cx, dy=Y[j2]-cy, den=bx*dy-by*dx; if(Math.abs(den)<1e-14) continue;
+      const s=((cx-ax)*dy-(cy-ay)*dx)/den, u=((cx-ax)*by-(cy-ay)*bx)/den; if(s>0&&s<1&&u>0&&u<1) k++; } }
   return k;
 }
 function buildKnot3D(){

@@ -37,6 +37,10 @@
     const sA=best.sA/totalLen2D*total, sB=best.sB/totalLen2D*total;
     best.over=(cyc(sA,sOver)<=cyc(sB,sOver))? 'A':'B'; best.pending=false; }
   updateCrossInfo(); updateKnotType();
+  if(process.env.HK_LIFTDUMP0){   // 4.20: дампы лифтов ДО старта физики: базовый (после импорта) и один со случайными высотами
+    if(process.env.HK_LIFTMULT) window.__liftMaxMult=+process.env.HK_LIFTMULT;
+    const dump=(f)=>fs.writeFileSync(f, JSON.stringify({name:J.name, N, L0, liftCheck:(typeof _liftCheck!=='undefined')? _liftCheck : null, smooth:smooth.map(p=>[p.x,p.y]), crossings:crossings.map(c=>({x:c.x,y:c.y,sA:c.sA,sB:c.sB,over:c.over})), verts:verts.map(v=>[v.x,v.y,v.z])}));
+    liftFromDiagram(null); dump(process.env.HK_LIFTDUMP0+'_base.json'); let sd=5; const r=()=>{ sd=(Math.imul(sd,1103515245)+12345)&0x7fffffff; return sd/0x7fffffff; }; liftFromDiagram(r); dump(process.env.HK_LIFTDUMP0+'_try.json'); }
   if(process.env.HK_DUMP){ fs.writeFileSync(process.env.HK_DUMP, JSON.stringify({total:totalLen2D, pts:smooth.map(p=>[+p.x.toFixed(2),+p.y.toFixed(2)]), cross:crossings.map(c=>({x:+c.x.toFixed(2),y:+c.y.toFixed(2),sA:+c.sA.toFixed(2),sB:+c.sB.toFixed(2),over:c.over}))})); }   // HK_DUMP=<json>: кривая и пересечения для внешней отрисовки (blackink.py)
   const pdProgram=__require(path.join(process.cwd(),'pdcode.js'))(crossings);   // PD-код, каким его видит программа (для сверки с исходным в Regina)
   const out={name:J.name, pdProgram, expectCrossings:J.crossings, nc:crossings.length, matched, unmatched, dmaxPx:+dmax.toFixed(2), det:knotDet, isUnknot, pending:pendingCount()};
@@ -60,7 +64,9 @@
       const ev=Array.from(jacobiEig([[a/N,b/N,d/N],[b/N,e/N,f/N],[d/N,f/N,g/N]]).vals).sort((p,q)=>p-q); return {rad:+((mx-mn)/R).toFixed(4), flat:+(Math.sqrt(Math.max(0,ev[0]))/R).toFixed(4), E:isFinite(_ePrev)? +(+_ePrev).toPrecision(4) : null}; };
     if(process.env.HK_START){ H.play(); if(H.running()) H.play(); const S0=JSON.parse(fs.readFileSync(process.env.HK_START,'utf8'));   // продолжить с сохранённой 3D-формы (HK_SAVE прежнего прогона)
       _setVertsFrom(S0.verts.map(v=>new THREE.Vector3(v[0],v[1],v[2]))); recenter(); _fromLift=true; _liftFromDiagram=false; out.startedFrom=process.env.HK_START; }
+    if(process.env.HK_LIFTMULT) window.__liftMaxMult=+process.env.HK_LIFTMULT;   // стенд: предел роста числа вершин лифта (1 — без повторов)
     const t0=Date.now(); H.set({ms:1}); H.play(); out.tries=[]; let done=false; out.liftCheck=(typeof _liftCheck!=='undefined')? _liftCheck : null;   // 4.20: проверка лифта (mult, N, пересечения проекции, det)
+    if(process.env.HK_LIFTDUMP){ fs.writeFileSync(process.env.HK_LIFTDUMP, JSON.stringify({name:J.name, N, L0, liftCheck:out.liftCheck, smooth:smooth.map(p=>[p.x,p.y]), crossings:crossings.map(c=>({x:c.x,y:c.y,sA:c.sA,sB:c.sB,over:c.over})), verts:verts.map(v=>[v.x,v.y,v.z])})); }
     for(let attempt=0; attempt<=NSTIR; attempt++){
       let st=0, o=null; while(true){ o=H.step(200); st+=200; if(!o.running || st>=BUD) break; }
       const r=roundness(); out.tries.push({at:attempt, steps:st, settled:!o.running, rad:r.rad, flat:r.flat, E:r.E, det3d:_detRobust(3)});
