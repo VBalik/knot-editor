@@ -2255,7 +2255,9 @@ const WAVES_PHYSICS=true;   // 4.17: волны и в обычной серии 
 let _annWavesOn=false, _annNC=0, _annCfg=null;
 function _wavesMake(A){ const W=A.waves, n=N, nc=_annNC||(typeof crossings!=='undefined' && crossings.length)||Math.round(n/8);
   const div=W.div||[8,12], sp=W.speed||[0.5,4], wd=W.width||[0.5,1.5], M=Math.max(2, Math.round(nc/(div[0]+Math.random()*(div[1]-div[0]))));
-  const mk=()=>{ const w=[]; for(let k=0;k<M;k++) w.push({c:Math.random()*n, a:(Math.random()<0.5?-1:1)*(0.3+0.7*Math.random()), dir:(Math.random()<0.5?-1:1), v:sp[0]+Math.random()*(sp[1]-sp[0]), s:(wd[0]+Math.random()*(wd[1]-wd[0]))*n/M}); return w; };
+  // maxTravel — за весь отжиг (_annT шагов, пересчёт каждые _annEvery) волна проходит не больше maxTravel своих ширин: узел успевает отозваться
+  const mk=()=>{ const w=[]; for(let k=0;k<M;k++){ const q={c:Math.random()*n, a:(Math.random()<0.5?-1:1)*(0.3+0.7*Math.random()), dir:(Math.random()<0.5?-1:1), v:sp[0]+Math.random()*(sp[1]-sp[0]), s:(wd[0]+Math.random()*(wd[1]-wd[0]))*n/M};   // порядок случайных вызовов как в 4.16 (эталоны bench)
+      if(W.maxTravel>0) q.v=Math.min(q.v, W.maxTravel*q.s*_annEvery/Math.max(1,_annT)); w.push(q); } return w; };
   return {M, B:mk(), R:mk()}; }
 function _wavesProfile(w){ const n=N; if(!_annX || _annX.length!==n) _annX=new Float64Array(n); _annX.fill(0);
   for(const q of w){ for(let i=0;i<n;i++){ let d=i-q.c; d-=Math.round(d/n)*n; _annX[i]+=q.a*Math.exp(-0.5*d*d/(q.s*q.s)); } }
