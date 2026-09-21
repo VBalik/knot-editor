@@ -2202,7 +2202,7 @@ let settleCount=0;
 const COLLIDE_D=1.6;        // толщина проволоки в единицах L0 (см. thickD)
 const REP_SKIP=3;           // ближе стольких рёбер по нити — не «чужая» прядь
 let SETTLE_STEPS=60;        // столько подряд «тихих» шагов = равновесие
-let FREEZE_WIN=1000, FREEZE_EVERY=100, FREEZE_FRAC=0.01, _frz=null, _frzN=0, _frzK=0, _frzLast=false;   // 4.16: «форма замерла» (стенд: window.__freeze={win,frac})
+let FREEZE_WIN=1000, FREEZE_EVERY=100, FREEZE_FRAC=0.03, CREEP_FRAC=0.01, _frz=null, _frzE=null, _frzN=0, _frzK=0, _frzLast=false;   // 4.16/4.19: «форма замерла» (3 % R за 1000 шагов) и «ползучесть» (E упала < 1 % за 1000 шагов); стенд: H.set({freezeWin, freezeFrac, creepFrac})
 // ПРОВЕРКА ВТОРОГО ПОРЯДКА (2.03): покой по силе ≠ минимум — многократно свёрнутые кольца и
 // прочие сёдла эластики имеют нулевой градиент. Перед объявлением равновесия ищется
 // минимальное собственное значение гессиана на многообразии длин; при отрицательном —
@@ -3718,10 +3718,13 @@ function relaxStep(){
   // 4.16: ФОРМА ЗАМЕРЛА — за FREEZE_WIN шагов ни одна вершина не сдвинулась больше FREEZE_FRAC·R (радиус узла): попытка
   // дальше не меняется, считаем её пришедшей в покой (и для тривиального узла, который ждал плато энергии)
   let frozen=false;
-  if(stepCounter%FREEZE_EVERY===0){ const slots=FREEZE_WIN/FREEZE_EVERY; if(!_frz || _frz.length!==slots || _frzN!==n){ _frz=new Array(slots).fill(null); _frzN=n; _frzK=0; }
-    const old=_frz[_frzK%slots]; if(old){ let m=0; for(let i=0;i<n;i++){ const dx=verts[i].x-old[3*i], dy=verts[i].y-old[3*i+1], dz=verts[i].z-old[3*i+2]; const q=dx*dx+dy*dy+dz*dz; if(q>m) m=q; }
-      const R=knotRadius(); frozen = Math.sqrt(m) < FREEZE_FRAC*R; _frzLast=frozen; }
-    const cur=old||new Float64Array(3*n); for(let i=0;i<n;i++){ cur[3*i]=verts[i].x; cur[3*i+1]=verts[i].y; cur[3*i+2]=verts[i].z; } _frz[_frzK%slots]=cur; _frzK++; }
+  if(stepCounter%FREEZE_EVERY===0){ const slots=FREEZE_WIN/FREEZE_EVERY; if(!_frz || _frz.length!==slots || _frzN!==n){ _frz=new Array(slots).fill(null); _frzE=new Float64Array(slots).fill(NaN); _frzN=n; _frzK=0; }
+    const old=_frz[_frzK%slots], oldE=_frzE[_frzK%slots]; const annNow=!!(_kBmul && _inflate>=1) && !_annHard;
+    if(old){ let m=0; for(let i=0;i<n;i++){ const dx=verts[i].x-old[3*i], dy=verts[i].y-old[3*i+1], dz=verts[i].z-old[3*i+2]; const q=dx*dx+dy*dy+dz*dz; if(q>m) m=q; }
+      const R=knotRadius(); const still = Math.sqrt(m) < FREEZE_FRAC*R;
+      const creep = !annNow && isFinite(oldE) && isFinite(_ePrev) && (oldE-_ePrev) < CREEP_FRAC*Math.abs(oldE);   // вне отжига: за окно энергия почти не упала — дальше только ползти
+      frozen = still || creep; _frzLast=frozen; }
+    const cur=old||new Float64Array(3*n); for(let i=0;i<n;i++){ cur[3*i]=verts[i].x; cur[3*i+1]=verts[i].y; cur[3*i+2]=verts[i].z; } _frz[_frzK%slots]=cur; _frzE[_frzK%slots]=annNow? NaN : _ePrev; _frzK++; }
   else frozen=_frzLast;
   // отказы line search — НЕ покой (на изломанном старте они бывают сериями):
   // после 5 подряд — сброс шага и импульса, спуск продолжается свежим
@@ -5381,7 +5384,7 @@ window.__knotStep=(k)=>{ for(let i=0;i<(k||6) && running;i++) relaxStep();
     capScale:+_capScale.toFixed(3), enStable:_dbgEnStable, dE:+_dbgDE.toFixed(4),
     status:document.getElementById('status').textContent }; };
 window.__knotSet=(o)=>{
-  if(o.steps!==undefined) SETTLE_STEPS=o.steps; if(o.freezeWin!==undefined) FREEZE_WIN=o.freezeWin; if(o.freezeFrac!==undefined) FREEZE_FRAC=o.freezeFrac;
+  if(o.steps!==undefined) SETTLE_STEPS=o.steps; if(o.freezeWin!==undefined) FREEZE_WIN=o.freezeWin; if(o.freezeFrac!==undefined) FREEZE_FRAC=o.freezeFrac; if(o.creepFrac!==undefined) CREEP_FRAC=o.creepFrac;
   if(o.floor!==undefined) SETTLE_FLOOR=o.floor;
   if(o.ftol!==undefined) FTOL=o.ftol;
   if(o.kb!==undefined) KB_PER=o.kb;
