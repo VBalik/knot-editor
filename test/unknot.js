@@ -10,7 +10,7 @@
 // Успех = настоящая окружность: разброс радиусов < UK_RAD и толщина вдоль наименьшей главной оси < UK_FLAT.
 // Параметры: UK_N (узлов), UK_C (пересечений), UK_SEED0, UK_STIR (попыток Stir), UK_BUD (шагов на попытку),
 //            UK_THICK/UK_REP/UK_BEND (ползунки), UK_VERBOSE=1 (ход прогона)
-(async ()=>{ if(process.env.HK_ANN) window.__ann=JSON.parse(process.env.HK_ANN);   // лаборатория отжига (annApply в index.html)
+(async ()=>{ const fs=__require('fs'); if(process.env.HK_ANN) window.__ann=JSON.parse(process.env.HK_ANN);   // лаборатория отжига (annApply в index.html)
  const H=global.__H; window.__noAutoSave=true; window.__noWorkers=true; window.__noAutoThick=true;
   const NK=+(process.env.UK_N||3), CT=+(process.env.UK_C||40), SEED0=+(process.env.UK_SEED0||1);
   const NSTIR=+(process.env.UK_STIR||10), BUD=+(process.env.UK_BUD||30000), VERB=process.env.UK_VERBOSE==='1';   // 4.11: бюджет 30 000 — ползущая попытка отдаётся Stir, а не ждёт часами (замер 2026-09-19)
@@ -85,11 +85,13 @@
     const rec={i:q, nc:d.nc, K:d.K, det2d:d.det, unknot2d:d.isUnknot, tries:[]};
     if(!d.isUnknot){ rec.ok=false; rec.err='diagram not trivial'; out.push(rec); continue; }
     H.set({ms:1}); H.play();                     // лифт из диаграммы и физика
-    let done=false;
+    let done=false; let _trPrev=null; if(VERB){ const d0=_detRobust(3); console.error('   ', q, 'lift det3d', d0, 'det2d', knotDet, 'N', N); _trPrev={st:0, det:d0, v:verts.map(v=>[v.x,v.y,v.z])}; }
     for(let attempt=0; attempt<=NSTIR; attempt++){
       let st=0, o=null; const tP=Date.now();
       while(true){ o=H.step(200); st+=200;
-        if(VERB && st%2000===0) console.error('   ', q, 'try', attempt, 'step', st, +((Date.now()-tP)/st).toFixed(1)+'ms/st', 'cross', crossings3D(), 'det3d', _detRobust(3), 'quietBy', typeof _dbgQuietBy==='undefined'? '' : _dbgQuietBy);
+        if(VERB && st%(+(process.env.UK_TRACE||2000))===0){ const dd=_detRobust(3); console.error('   ', q, 'try', attempt, 'step', st, +((Date.now()-tP)/st).toFixed(1)+'ms/st', 'cross', crossings3D(), 'det3d', dd, 'quietBy', typeof _dbgQuietBy==='undefined'? '' : _dbgQuietBy);
+          if(process.env.UK_DUMPDET){ if(_trPrev && dd!==_trPrev.det){ const pre=process.env.UK_DUMPDET+'_k'+q+'_t'+attempt+'_s'+st; fs.writeFileSync(pre+'_before.json', JSON.stringify({step:_trPrev.st, det:_trPrev.det, N, L0, verts:_trPrev.v})); fs.writeFileSync(pre+'_after.json', JSON.stringify({step:st, det:dd, N, L0, verts:verts.map(v=>[v.x,v.y,v.z])})); console.error('   DET FLIP dumped', pre); }
+            _trPrev={st, det:dd, v:verts.map(v=>[v.x,v.y,v.z])}; } }
         if(!o.running || st>=BUD) break; }
       const r=roundness(), cc=crossings3D(), d3=_detRobust(3);
       rec.tries.push({at:attempt, steps:st, settled:!o.running, cross:cc, rad:r.rad, flat:r.flat, det3d:d3});
