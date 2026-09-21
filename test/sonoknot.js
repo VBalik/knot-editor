@@ -52,6 +52,12 @@
   const EPS=+(process.env.SN_EPS||0.003), K=+(process.env.SN_K||25), MAXIT=+(process.env.SN_MAX||20000), STALL=+(process.env.SN_STALL||200), SHAKE=+(process.env.SN_SHAKE||0.02);
   const nV=N; let _s=11; const rnd=()=>{ _s=(Math.imul(_s,1103515245)+12345)&0x7fffffff; return _s/0x7fffffff; };
   const cen=()=>{ let x=0,y=0,z=0; for(const v of verts){ x+=v.x; y+=v.y; z+=v.z; } return {x:x/nV,y:y/nV,z:z/nV}; };
+  const crossPlane=()=>{ const c=cen(); let a=0,b=0,d=0,e=0,f=0,g=0; for(const v of verts){ const x=v.x-c.x, y=v.y-c.y, z=v.z-c.z; a+=x*x; b+=x*y; d+=x*z; e+=y*y; f+=y*z; g+=z*z; }
+    const ei=jacobiEig([[a/nV,b/nV,d/nV],[b/nV,e/nV,f/nV],[d/nV,f/nV,g/nV]]), ord=[0,1,2].sort((i,j)=>ei.vals[j]-ei.vals[i]), e1=Array.from(ei.vecs[ord[0]]), e2=Array.from(ei.vecs[ord[1]]);
+    const n=nV, X=new Float64Array(n), Y=new Float64Array(n); for(let i=0;i<n;i++){ const v=verts[i]; X[i]=v.x*e1[0]+v.y*e1[1]+v.z*e1[2]; Y[i]=v.x*e2[0]+v.y*e2[1]+v.z*e2[2]; }
+    let k=0; for(let i=0;i<n;i++){ const i2=(i+1)%n, ax=X[i], ay=Y[i], bx=X[i2]-ax, by=Y[i2]-ay;
+      for(let j=i+2;j<n;j++){ if(i===0 && j===n-1) continue; const j2=(j+1)%n, cx=X[j], cy=Y[j], dx=X[j2]-cx, dy=Y[j2]-cy, den=bx*dy-by*dx; if(Math.abs(den)<1e-14) continue;
+        const s=((cx-ax)*dy-(cy-ay)*dx)/den, u=((cx-ax)*by-(cy-ay)*bx)/den; if(s>0&&s<1&&u>0&&u<1) k++; } } return k; };   // 4.16: пересечения в проекции на плоскость узла (окружность — 0)
   const roundness=()=>{ const c=cen(); let mn=Infinity, mx=0, sum=0; for(const v of verts){ const r=Math.hypot(v.x-c.x, v.y-c.y, v.z-c.z); if(r<mn)mn=r; if(r>mx)mx=r; sum+=r; }
     const R=sum/nV; let a=0,b=0,d=0,e=0,f=0,g=0; for(const v of verts){ const x=v.x-c.x, y=v.y-c.y, z=v.z-c.z; a+=x*x; b+=x*y; d+=x*z; e+=y*y; f+=y*z; g+=z*z; }
     const ev=Array.from(jacobiEig([[a/nV,b/nV,d/nV],[b/nV,e/nV,f/nV],[d/nV,f/nV,g/nV]]).vals).sort((p,q)=>p-q); return {rad:+((mx-mn)/R).toFixed(4), flat:+(Math.sqrt(Math.max(0,ev[0]))/R).toFixed(4), R:+(R/L0).toFixed(1)}; };
@@ -87,7 +93,7 @@
   recenter();
   if(process.env.SN_POLISH==='1'){ _inflate=1; _energyDirty=true; _ePrev=-1; H.play(); let st=0, o=null; while(true){ o=H.step(200); st+=200; if(!o.running || st>=+(process.env.UK_BUD||30000)) break; } if(H.running()) H.play(); out.polishSteps=st; }   // доводка обычной физикой
   const r=roundness(); out.sono=Object.assign(out.sono, {iters:it, rejected, D_L0:+(D/L0).toFixed(2), det3d:_detRobust(3), ...r, sec:+((Date.now()-t0)/1000).toFixed(0), log});
-  out.ok=r.rad<0.08 && r.flat<0.05; out.N=N;
+  out.cross=crossPlane(); out.ok=r.rad<0.08 && r.flat<0.05 && out.cross===0; out.N=N;
   if(process.env.HK_SAVE){ fs.writeFileSync(process.env.HK_SAVE, JSON.stringify({name:J.name, N, verts:verts.map(v=>[+v.x.toFixed(4),+v.y.toFixed(4),+v.z.toFixed(4)])})); }
   if(process.env.HK_PROJ){ try{ out.proj=__require(path.join(process.cwd(),'proj3d.js'))(verts, jacobiEig, process.env.HK_PROJ, 480); }catch(e){ out.projErr=String(e).slice(0,120); } }
   return out; })()

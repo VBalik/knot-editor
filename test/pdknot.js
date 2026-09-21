@@ -49,6 +49,12 @@
     const NSTIR=+(process.env.UK_STIR||10), BUD=+(process.env.UK_BUD||30000), VERB=process.env.UK_VERBOSE==='1';
     let _s=7; const rnd=()=>{ _s=(Math.imul(_s,1103515245)+12345)&0x7fffffff; return _s/0x7fffffff; };
     const cen=()=>{ let x=0,y=0,z=0; for(const v of verts){ x+=v.x; y+=v.y; z+=v.z; } return {x:x/N,y:y/N,z:z/N}; };
+  const crossPlane=()=>{ const c=cen(); let a=0,b=0,d=0,e=0,f=0,g=0; for(const v of verts){ const x=v.x-c.x, y=v.y-c.y, z=v.z-c.z; a+=x*x; b+=x*y; d+=x*z; e+=y*y; f+=y*z; g+=z*z; }
+    const ei=jacobiEig([[a/N,b/N,d/N],[b/N,e/N,f/N],[d/N,f/N,g/N]]), ord=[0,1,2].sort((i,j)=>ei.vals[j]-ei.vals[i]), e1=Array.from(ei.vecs[ord[0]]), e2=Array.from(ei.vecs[ord[1]]);
+    const n=N, X=new Float64Array(n), Y=new Float64Array(n); for(let i=0;i<n;i++){ const v=verts[i]; X[i]=v.x*e1[0]+v.y*e1[1]+v.z*e1[2]; Y[i]=v.x*e2[0]+v.y*e2[1]+v.z*e2[2]; }
+    let k=0; for(let i=0;i<n;i++){ const i2=(i+1)%n, ax=X[i], ay=Y[i], bx=X[i2]-ax, by=Y[i2]-ay;
+      for(let j=i+2;j<n;j++){ if(i===0 && j===n-1) continue; const j2=(j+1)%n, cx=X[j], cy=Y[j], dx=X[j2]-cx, dy=Y[j2]-cy, den=bx*dy-by*dx; if(Math.abs(den)<1e-14) continue;
+        const s=((cx-ax)*dy-(cy-ay)*dx)/den, u=((cx-ax)*by-(cy-ay)*bx)/den; if(s>0&&s<1&&u>0&&u<1) k++; } } return k; };   // 4.16: пересечения в проекции на плоскость узла (окружность — 0)
     const roundness=()=>{ const c=cen(); let mn=Infinity, mx=0, sum=0; for(const v of verts){ const r=Math.hypot(v.x-c.x, v.y-c.y, v.z-c.z); if(r<mn)mn=r; if(r>mx)mx=r; sum+=r; }
       const R=sum/N; let a=0,b=0,d=0,e=0,f=0,g=0; for(const v of verts){ const x=v.x-c.x, y=v.y-c.y, z=v.z-c.z; a+=x*x; b+=x*y; d+=x*z; e+=y*y; f+=y*z; g+=z*z; }
       const ev=Array.from(jacobiEig([[a/N,b/N,d/N],[b/N,e/N,f/N],[d/N,f/N,g/N]]).vals).sort((p,q)=>p-q); return {rad:+((mx-mn)/R).toFixed(4), flat:+(Math.sqrt(Math.max(0,ev[0]))/R).toFixed(4), E:isFinite(_ePrev)? +(+_ePrev).toPrecision(4) : null}; };
@@ -59,7 +65,8 @@
       let st=0, o=null; while(true){ o=H.step(200); st+=200; if(!o.running || st>=BUD) break; }
       const r=roundness(); out.tries.push({at:attempt, steps:st, settled:!o.running, rad:r.rad, flat:r.flat, E:r.E, det3d:_detRobust(3)});
       if(VERB) console.error(J.name, JSON.stringify(out.tries[out.tries.length-1]));
-      if(r.rad<0.08 && r.flat<0.05){ done=true; break; }
+      out.tries[out.tries.length-1].cross=crossPlane();
+      if(r.rad<0.08 && r.flat<0.05 && out.tries[out.tries.length-1].cross===0){ done=true; break; }
       if(attempt===NSTIR) break; if(H.running()) H.play(); if(!window.__knotStir()) break; while(_stir) window.__knotStir(); }
     out.ok=done; out.N=N; out.det3dEnd=_detRobust(3); out.sec=+((Date.now()-t0)/1000).toFixed(1);
     if(process.env.HK_SAVE){ fs.mkdirSync(path.dirname(process.env.HK_SAVE),{recursive:true}); fs.writeFileSync(process.env.HK_SAVE, JSON.stringify({name:J.name, N, verts:verts.map(v=>[+v.x.toFixed(4),+v.y.toFixed(4),+v.z.toFixed(4)])})); out.saved=process.env.HK_SAVE; }

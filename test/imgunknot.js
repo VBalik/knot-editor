@@ -29,7 +29,7 @@
     for(const v of verts){ const x=v.x-c.x, y=v.y-c.y, z=v.z-c.z; a+=x*x; b+=x*y; d+=x*z; e+=y*y; f+=y*z; g+=z*z; }
     const ev=Array.from(jacobiEig([[a/N,b/N,d/N],[b/N,e/N,f/N],[d/N,f/N,g/N]]).vals).sort((p,q)=>p-q);
     return {R:+R.toFixed(3), rad:+((mx-mn)/R).toFixed(4), flat:+(Math.sqrt(Math.max(0,ev[0]))/R).toFixed(4)}; }
-  const isCircle=()=>{ const q=roundness(); return q.rad<0.08 && q.flat<0.05; };
+  const isCircle=()=>{ const q=roundness(); return q.rad<0.08 && q.flat<0.05 && crossings3D()===0; };   // 4.16: и ни одного пересечения в проекции — тугая двойная катушка обманывает разброс и плоскость
   // --- картинка, как в imgphoto.js
   const buf=fs.readFileSync(src), ext=path.extname(src).toLowerCase(); let img;
   if(ext==='.jpg'||ext==='.jpeg'){ const j=mod('jpeg-js').decode(buf,{useTArray:true, formatAsRGBA:true, maxMemoryUsageInMB:1024}); img={width:j.width, height:j.height, data:j.data}; }

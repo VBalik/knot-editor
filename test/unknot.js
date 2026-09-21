@@ -43,7 +43,7 @@
     for(const v of verts){ const x=v.x-c.x, y=v.y-c.y, z=v.z-c.z; a+=x*x; b+=x*y; d+=x*z; e+=y*y; f+=y*z; g+=z*z; }
     const ev=Array.from(jacobiEig([[a/N,b/N,d/N],[b/N,e/N,f/N],[d/N,f/N,g/N]]).vals).sort((p,q)=>p-q);
     return {R:+R.toFixed(3), rad:+((mx-mn)/R).toFixed(4), flat:+(Math.sqrt(Math.max(0,ev[0]))/R).toFixed(4)}; }
-  const isCircle=()=>{ const q=roundness(); return q.rad<RADT && q.flat<FLATT; };
+  const isCircle=()=>{ const q=roundness(); return q.rad<RADT && q.flat<FLATT && crossings3D()===0; };   // 4.16: и ни одного пересечения в проекции — тугая двойная катушка обманывает разброс и плоскость
 
   // плоская кривая со множеством самопересечений: сумма случайных гармоник. Число пересечений растёт
   // примерно как квадрат наивысшей гармоники, поэтому нужное C подбирается по K
@@ -89,7 +89,7 @@
     for(let attempt=0; attempt<=NSTIR; attempt++){
       let st=0, o=null; const tP=Date.now();
       while(true){ o=H.step(200); st+=200;
-        if(VERB && st%10000===0) console.error('   ', q, 'try', attempt, 'step', st, +((Date.now()-tP)/st).toFixed(1)+'ms/st', 'cross', crossings3D());
+        if(VERB && st%2000===0) console.error('   ', q, 'try', attempt, 'step', st, +((Date.now()-tP)/st).toFixed(1)+'ms/st', 'cross', crossings3D(), 'det3d', _detRobust(3), 'quietBy', typeof _dbgQuietBy==='undefined'? '' : _dbgQuietBy);
         if(!o.running || st>=BUD) break; }
       const r=roundness(), cc=crossings3D(), d3=_detRobust(3);
       rec.tries.push({at:attempt, steps:st, settled:!o.running, cross:cc, rad:r.rad, flat:r.flat, det3d:d3});
