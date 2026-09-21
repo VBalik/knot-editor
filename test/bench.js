@@ -4,8 +4,8 @@
 // STEPS=1500 FULL=0 KNOTS=trefoil,rand30,rand60 node harness.js bench.js   (KNOT_PAGE=… — другой файл; NOWASM=1 — JS-путь ядра пар, 3.2)
 // ЭТАЛОН ЗАВИСИТ ОТ ВЕРСИИ NODE: Math.pow/exp/sin и т. п. в разных V8 расходятся в последних битах, за 1500 шагов хэш траектории другой при той же физике
 // (проверено облачной сессией 2026-09-15: v3.7, v3.8, v3.9 и NOWASM=1 на Node 22 дают одну и ту же тройку). Эталоны — по главной версии Node, только для STEPS=1500.
-(async ()=>{ const REF_HASH={ 26:{trefoil:-1541363460, rand30:-286394620, rand60:1614448689},   // MacBook Air, Node v26.8.1
-                   22:{trefoil:348751188, rand30:1089954128, rand60:-1041345001} };   // облако Claude Code, Node v22.22.2
+(async ()=>{ const REF_HASH={ // 26: эталон Air (Node v26.8.1) снят 4.17 — физика серии изменилась (волны отжига в Physics), пересчитать на Air: hashMatch null до этого
+                   22:{trefoil:-1230814549, rand30:2101400752, rand60:1283745663} };   // облако Claude Code, Node v22.22.2, 4.17 (до 4.17: 348751188, 1089954128, -1041345001)
   const H=global.__H; window.__noAutoSave=true; const out={}; if(process.env.NOWASM) window.__noWasm=true;
   out.wasm0=window.__wasm? window.__wasm() : null;
   const STEPS=+(process.env.STEPS||1500), FULL=+(process.env.FULL||0), KNOTS=(process.env.KNOTS||'trefoil,rand30,rand60').split(',');
