@@ -283,7 +283,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   <!-- ================= LEFT: 2D drawing ================= -->
   <div id="left" class="pane">
     <div class="topbar">
-      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">4.20</span></span>
+      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">5.0</span></span>
       <button id="restoreLast" title="Restore the last drawing from telemetry">Last</button><button id="clear" class="ghost">Clear</button>
       <span class="seg" id="presets" title="Example knots">
         <button class="ex" data-knot="trefoil" title="Trefoil 3₁">3₁</button>
@@ -317,7 +317,8 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
       <span class="chip" title="Tight packing: the knot shrinks to near contact (held only by contact repulsion). A separate mode — NOT stiffness"><label style="cursor:pointer">Tight <input type="checkbox" id="tightChk"></label></span>
       <span class="chip" title="Self-repulsion, 1–10 (×2 since 4.13: each step = 2 units, r = 2×slider): strands cannot come closer than (w+r) units between axes; beyond that a 1/Δ⁴ repulsion (×5 since 2.35)">Repel. <input type="range" id="repCoef" min="1" max="10" step="1" value="5"><b id="repVal">5</b></span>
       <span class="chip" title="Number of tries (minimization attempts), 1–20: each try starts from the diagram with its own random heights of the knot parts; applies to the next run">Tries <input id="msN" type="number" min="1" max="20" value="5"></span>
-      <button id="play" class="go" title="Physics: run the tries · Pause · Stir: pull loops of the final shape out into free space (topology-safe; mode select: loops | inside-out inversion; falls back to pulling parts apart) and rerun the tries">▶ Physics</button>
+      <button id="play" class="go" title="Physics: run the tries · Pause · Stir: rework the final shape by the chosen technique (contacts | simplify) and rerun the tries">▶ Physics</button>
+      <span class="chip" title="Stir technique: contacts — push the tightest strand pairs apart (topology-safe) · simplify — project the 3D shape, simplify the diagram by Reidemeister moves R1/R2/R3, lay it out anew (type kept: same rotation system, determinant checked) and rerun the tries from the new diagram"><select id="stirMode"><option value="open">contacts</option><option value="simplify">simplify</option></select></span>
       <button id="exportObj" class="ghost" title="Export the 3D model as OBJ">OBJ</button>
       <button id="exportTelem" class="ghost" title="Download relaxation telemetry for diagnostics">Telem</button>
       <span class="tspacer"></span>
@@ -3393,6 +3394,382 @@ function stirFieldContacts(){
   if(_stir){ _stir.fields++; _stir.opened=taken; }
 }
 function stirRefield(){ if(_stir && _stir.mode==='open') stirFieldContacts(); else stirField(); }
+/* ============================================================================
+   5.0: STIR «SIMPLIFY» — КОМБИНАТОРНОЕ УПРОЩЕНИЕ ДИАГРАММЫ (ходы Рейдемейстера)
+   Идея: физика упростила форму в 3D, но диаграмма в 2D осталась старой. Берём ПРОЕКЦИЮ текущей 3D-формы (и саму
+   диаграмму 2D), снимаем PD-код, упрощаем его ходами R1/R2 (жадно) и R3 (случайно, как simplify() Regina), укладываем
+   упрощённую диаграмму на плоскость (вложение Татта стеллированной триангуляции + расталкивание с сохранением
+   планарности), строим из укладки новую 2D-диаграмму программы, проверяем число пересечений и определитель, и
+   запускаем серию попыток из нового лифта. Тип узла хранится строго: ходы Рейдемейстера — изотопия, укладка —
+   та же вращательная система, проходы переносятся по позициям; сверх того — det до/после.
+   Движок ходов — тот же код, что test/rmoves.js (проверен сверкой с Regina: Джонс совпадает, monster/KL слабые → 0).
+   ============================================================================ */
+(function(root){
+function Link(pd){   // pd: массив [i,j,k,l] с метками 1..2n (или 0..2n-1) в соглашении KnotTheory
+  this.cr=[]; this.arcs=new Map();
+  if(!pd) return;
+  const n=pd.length; if(!n) return;
+  let mn=Infinity; for(const t of pd) for(const x of t) mn=Math.min(mn,x);
+  const off=(mn===0)?1:0, M=2*n;
+  const P=pd.map(t=>t.map(x=>x+off));
+  for(let c=0;c<n;c++){ const [i,j,k,l]=P[c];
+    const lj=(j===l+1)||(l===M && j===1);   // верхняя прядь: l→j, если j следует за l по ходу
+    const d=lj? [1,-1,-1,1] : [1,1,-1,-1];   // 1 — конец входящий (голова дуги), -1 — выходящий (хвост)
+    this.cr.push({e:[i,j,k,l], d}); }
+  for(let c=0;c<n;c++) for(let p=0;p<4;p++){ const a=this.cr[c].e[p]; let r=this.arcs.get(a); if(!r){ r={t:null,h:null}; this.arcs.set(a,r); }
+    if(this.cr[c].d[p]>0) r.h=[c,p]; else r.t=[c,p]; }
+  for(const [a,r] of this.arcs) if(!r.t||!r.h) throw new Error('bad PD: arc '+a+' has no tail or head');
+}
+Link.prototype.clone=function(){ const L=new Link(null); L.cr=this.cr.map(c=>({e:c.e.slice(), d:c.d.slice()})); for(const [a,r] of this.arcs) L.arcs.set(a,{t:r.t.slice(), h:r.h.slice()}); return L; };
+Link.prototype.size=function(){ return this.cr.length; };
+Link.prototype._other=function(c,p){ const a=this.cr[c].e[p], r=this.arcs.get(a); return (r.t[0]===c && r.t[1]===p)? r.h : r.t; };
+Link.prototype.faces=function(){   // грани; грань — массив концов [c,p] (выход из c по дуге e[p], затем следующий конец против часовой)
+  const n=this.cr.length, seen=new Set(), F=[];
+  for(let c0=0;c0<n;c0++) for(let p0=0;p0<4;p0++){ const k0=c0*4+p0; if(seen.has(k0)) continue;
+    const f=[]; let c=c0, p=p0;
+    while(!seen.has(c*4+p)){ seen.add(c*4+p); f.push([c,p]); const o=this._other(c,p); c=o[0]; p=(o[1]+1)%4; }
+    F.push(f); }
+  return F;
+};
+Link.prototype.valid=function(){
+  const n=this.cr.length; if(!n) return true;
+  for(const [a,r] of this.arcs){ if(this.cr[r.t[0]].e[r.t[1]]!==a || this.cr[r.h[0]].e[r.h[1]]!==a) return false; if(this.cr[r.t[0]].d[r.t[1]]!==-1 || this.cr[r.h[0]].d[r.h[1]]!==1) return false; }
+  if(this.arcs.size!==2*n) return false;
+  return this.faces().length===n+2;
+};
+Link.prototype._renumber=function(){
+  const map=new Map(); const cr=[]; this.cr.forEach((c,i)=>{ if(c){ map.set(i,cr.length); cr.push(c); } }); this.cr=cr;
+  for(const [a,r] of this.arcs){ r.t[0]=map.get(r.t[0]); r.h[0]=map.get(r.h[0]); }
+};
+Link.prototype._merge=function(inn,out){
+  if(inn===out) return false;
+  const ro=this.arcs.get(out), ri=this.arcs.get(inn); ri.h=ro.h; this.cr[ro.h[0]].e[ro.h[1]]=inn; this.arcs.delete(out); return true;
+};
+Link.prototype._strandEnds=function(c,p){ const q=(p+2)%4, cr=this.cr[c]; return cr.d[p]>0? [cr.e[p], cr.e[q]] : [cr.e[q], cr.e[p]]; };
+Link.prototype.r1=function(f){
+  const [c,p]=f[0], a=this.cr[c].e[p], r=this.arcs.get(a); if(r.t[0]!==c || r.h[0]!==c) return false;
+  const pt=r.t[1], ph=r.h[1];
+  const rest=[0,1,2,3].filter(x=>x!==pt && x!==ph); const cr=this.cr[c];
+  const inn=cr.d[rest[0]]>0? cr.e[rest[0]] : cr.e[rest[1]], out=cr.d[rest[0]]>0? cr.e[rest[1]] : cr.e[rest[0]];
+  this.arcs.delete(a); const ok=this._merge(inn,out); if(!ok){ this.arcs.delete(inn); } this.cr[c]=null; this._renumber(); return true;
+};
+Link.prototype.r2ok=function(f){ if(f.length!==2) return false; const [c1,p1]=f[0], [c2,p2]=f[1]; if(c1===c2) return false;
+  const a=this.cr[c1].e[p1], b=this.cr[c2].e[p2]; if(a===b) return false;
+  const ra=this.arcs.get(a), rb=this.arcs.get(b);
+  const pa2=(ra.t[0]===c1)? ra.h[1] : ra.t[1];
+  const pb1=(rb.t[0]===c2)? rb.h[1] : rb.t[1];
+  if(!((ra.t[0]===c1&&ra.h[0]===c2)||(ra.h[0]===c1&&ra.t[0]===c2))) return false;
+  if(!((rb.t[0]===c1&&rb.h[0]===c2)||(rb.h[0]===c1&&rb.t[0]===c2))) return false;
+  return (p1%2)===(pa2%2) && (pb1%2)===(p2%2) && (p1%2)!==(pb1%2); };
+Link.prototype.r2=function(f){
+  if(!this.r2ok(f)) return false; const [c1,p1]=f[0], [c2,p2]=f[1]; const a=this.cr[c1].e[p1], b=this.cr[c2].e[p2];
+  const ra=this.arcs.get(a), rb=this.arcs.get(b);
+  const pa2=(ra.t[0]===c1)? ra.h[1] : ra.t[1], pb1=(rb.t[0]===c2)? rb.h[1] : rb.t[1];
+  const A1=this._strandEnds(c1,p1), A2=this._strandEnds(c2,pa2), B1=this._strandEnds(c1,pb1), B2=this._strandEnds(c2,p2);
+  const outer=(E1,E2,x)=>{ const inn=(E1[0]===x)? E2[0] : E1[0], out=(E1[1]===x)? E2[1] : E1[1]; return [inn,out]; };
+  const [ai,ao]=outer(A1,A2,a), [bi,bo]=outer(B1,B2,b);
+  this.arcs.delete(a); this.arcs.delete(b);
+  if(ao===bi && bo===ai){ this.arcs.delete(ai); this.arcs.delete(ao); }               // обе пряди — одна петля без других пересечений (компонента исчезает)
+  else if(ao===bi){ this.arcs.delete(ao); if(!this._merge(ai,bo)) this.arcs.delete(ai); }   // прядь A сразу возвращается прядью B: ai → bo
+  else if(bo===ai){ this.arcs.delete(bo); if(!this._merge(bi,ao)) this.arcs.delete(bi); }
+  else { if(!this._merge(ai,ao)) this.arcs.delete(ai); if(!this._merge(bi,bo)) this.arcs.delete(bi); }
+  this.cr[c1]=null; this.cr[c2]=null; this._renumber(); return true;
+};
+Link.prototype.r3ok=function(f){ if(f.length!==3) return false; const cs=f.map(x=>x[0]); if(new Set(cs).size!==3) return false;
+  for(let k=0;k<3;k++){ const [c,p]=f[k]; const a=this.cr[c].e[p], r=this.arcs.get(a); const o=(r.t[0]===c)? r.h : r.t;
+    if((p%2)===(o[1]%2)) return k; }
+  return -1; };
+Link.prototype.r3=function(f){
+  const k=this.r3ok(f); if(k===false || k<0) return false;
+  const plan=[];
+  for(let m=0;m<3;m++){ const [c,p]=f[m]; const s=this.cr[c].e[p], r=this.arcs.get(s); const P=r.t, Q=r.h;
+    const Ein=this._strandEnds(P[0],P[1]), Eout=this._strandEnds(Q[0],Q[1]);
+    plan.push({s, P:P.slice(), Q:Q.slice(), x:Ein[0], y:Eout[1], pin:(this.cr[P[0]].d[P[1]]>0? P[1] : (P[1]+2)%4), pout:(this.cr[P[0]].d[P[1]]>0? (P[1]+2)%4 : P[1]),
+      qin:(this.cr[Q[0]].d[Q[1]]>0? Q[1] : (Q[1]+2)%4), qout:(this.cr[Q[0]].d[Q[1]]>0? (Q[1]+2)%4 : Q[1])}); }
+  for(const t of plan){ const {s,P,Q,x,y}=t; const cP=this.cr[P[0]], cQ=this.cr[Q[0]];
+    cP.e[t.pin]=s; cP.e[t.pout]=y; cQ.e[t.qin]=x; cQ.e[t.qout]=s;
+    const rs=this.arcs.get(s); rs.t=[Q[0],t.qout]; rs.h=[P[0],t.pin];
+    this.arcs.get(x).h=[Q[0],t.qin]; this.arcs.get(y).t=[P[0],t.pout]; }
+  return true;
+};
+Link.prototype.nugatory=function(){   // убрать одно нугаторное пересечение (точку сочленения: грань проходит через него дважды); true — убрано
+  const F=this.faces();
+  for(const f of F){ const at=new Map(); for(let k=0;k<f.length;k++){ const [c,q]=f[k]; if(at.has(c)){ const q1=at.get(c); if(((q-q1)%4+4)%4!==2) continue;
+        // элемент [c,q] — приход по позиции q−1, уход по q: углы (q1−1→q1) и (q1+1→q1+2); стороны A={q1,q1+1}, B={q1+2,q1+3};
+        // соединяем p↔p+3 и p+1↔p+2 при p=q1 (каждая пара — по одной дуге с каждой стороны); сторона B при нужде переворачивается
+        const p=q1%4, cr=this.cr[c], pairs=[[p,(p+3)%4],[(p+1)%4,(p+2)%4]];
+        if(cr.d[p]===cr.d[(p+3)%4]){   // ориентации не стыкуются — перевернуть сторону B (поворот 1-тангла на π вокруг оси через его концы — изотопия)
+          const side=new Set(), stack=[]; for(const s of [(p+2)%4,(p+3)%4]){ const r=this.arcs.get(cr.e[s]); const o=(r.t[0]===c && r.t[1]===s)? r.h : r.t; if(o[0]!==c) stack.push(o[0]); }
+          while(stack.length){ const x=stack.pop(); if(x===c || side.has(x)) continue; side.add(x); for(let s=0;s<4;s++){ const o=this._other(x,s); if(o[0]!==c && !side.has(o[0])) stack.push(o[0]); } }
+          const arcsB=new Set(); for(const x of side) for(let s=0;s<4;s++) arcsB.add(this.cr[x].e[s]);
+          for(const x of side){ const X=this.cr[x]; X.e=[X.e[2],X.e[3],X.e[0],X.e[1]]; X.d=[-X.d[2],-X.d[3],-X.d[0],-X.d[1]]; }
+          for(const a of arcsB){ const r=this.arcs.get(a); const t=r.t, h=r.h; r.t=[h[0], side.has(h[0])? (h[1]+2)%4 : h[1]]; r.h=[t[0], side.has(t[0])? (t[1]+2)%4 : t[1]]; }
+          for(const s of [0,1,2,3]){ const a=cr.e[s], r=this.arcs.get(a); cr.d[s]=(r.h[0]===c && r.h[1]===s)? 1 : -1; } }   // концы у c: статус по перевёрнутым дугам
+        for(const [x,y] of pairs){ const ax=cr.e[x], ay=cr.e[y]; const inn=cr.d[x]>0? ax : ay, out=cr.d[x]>0? ay : ax; if(!this._merge(inn,out)) this.arcs.delete(inn); }
+        this.cr[c]=null; this._renumber(); return true; }
+      at.set(c,q); } }
+  return false;
+};
+Link.prototype.reduce=function(){   // R1/R2 и нугаторные пересечения — до упора; возвращает число снятых пересечений
+  let removed=0, again=true;
+  while(again && this.cr.length){ again=false; const F=this.faces();
+    for(const f of F){ if(f.length===1){ const n0=this.cr.length; if(this.r1(f)){ removed+=n0-this.cr.length; again=true; break; } }
+      if(f.length===2 && this.r2ok(f)){ const n0=this.cr.length; if(this.r2(f)){ removed+=n0-this.cr.length; again=true; break; } } }
+    if(!again && this.nugatory()){ removed++; again=true; } }
+  return removed;
+};
+Link.prototype.simplify=function(opt){
+  opt=opt||{}; const budget=opt.r3Budget||1000; let rnd=opt.rnd||Math.random;
+  this.reduce(); let best=this.clone(), stall=0, moves=0;
+  while(stall<budget && this.cr.length>2){
+    const F=this.faces().filter(f=>f.length===3 && this.r3ok(f)!==false && this.r3ok(f)>=0);
+    if(!F.length) break;
+    const f=F[Math.floor(rnd()*F.length)]; if(!this.r3(f)) break; moves++;
+    if(this.reduce()>0){ stall=0; if(this.cr.length<best.cr.length) best=this.clone(); } else stall++;
+  }
+  return {best, r3moves:moves};
+};
+Link.prototype.toPD=function(){
+  const n=this.cr.length; if(!n) return [];
+  const label=new Map(); let a0=this.cr[0].e[0], a=a0, k=1;
+  for(let guard=0; guard<4*n+4; guard++){ if(label.has(a)) break; label.set(a,k++); const r=this.arcs.get(a); const [c,p]=r.h; a=this.cr[c].e[(p+2)%4]; }
+  if(label.size!==2*n) throw new Error('not a single component: '+label.size+' of '+2*n);
+  return this.cr.map(c=>c.e.map(x=>label.get(x)));
+};
+Link.prototype.components=function(){ const n=this.cr.length; if(!n) return 0; const seen=new Set(); let comps=0;
+  for(const [a0] of this.arcs){ if(seen.has(a0)) continue; comps++; let a=a0; while(!seen.has(a)){ seen.add(a); const r=this.arcs.get(a); const [c,p]=r.h; a=this.cr[c].e[(p+2)%4]; } }
+  return comps; };
+root.RMoves={Link};
+})(typeof window!=='undefined'? window : globalThis);
+
+// PD-код из списка пересечений {sA,sB,over,dirA,dirB} (dir — [dx,dy] в МАТЕМАТИЧЕСКИХ координатах, y вверх; в 2D программы y вниз — передать -dy)
+function _pdFromCross(cr){
+  const m=cr.length; if(!m) return [];
+  const ev=[]; cr.forEach((c,ci)=>{ ev.push({s:c.sA,ci,pass:'A'}); ev.push({s:c.sB,ci,pass:'B'}); }); ev.sort((a,b)=>a.s-b.s);
+  const M=ev.length, at=new Map(); ev.forEach((e,k)=>at.set(e.ci+e.pass,k));   // ребро k идёт от события k к k+1, метка k+1
+  const pd=[];
+  cr.forEach((c,ci)=>{ const o=c.over, u=(o==='A'?'B':'A'), ku=at.get(ci+u), ko=at.get(ci+o);
+    const inU=((ku-1+M)%M)+1, outU=ku+1, inO=((ko-1+M)%M)+1, outO=ko+1;
+    const du=(u==='A'?c.dirA:c.dirB), dov=(o==='A'?c.dirA:c.dirB); const x=du[0]*dov[1]-du[1]*dov[0];
+    pd.push(x<0? [inU,outO,outU,inO] : [inU,inO,outU,outO]); });   // против часовой от входящего нижнего ребра первым идёт выходящее верхнее, если cross(u,o)<0
+  return pd;
+}
+// PD-код проекции замкнутой ломаной vs вдоль базиса: e1,e2 — плоскость (математическая ориентация), e3=e1×e2 — к зрителю (над = больше по e3)
+function _pdProject(vs, e1, e2, e3){
+  const n=vs.length, X=new Float64Array(n), Y=new Float64Array(n), Z=new Float64Array(n);
+  for(let i=0;i<n;i++){ const v=vs[i]; X[i]=v.x*e1[0]+v.y*e1[1]+v.z*e1[2]; Y[i]=v.x*e2[0]+v.y*e2[1]+v.z*e2[2]; Z[i]=v.x*e3[0]+v.y*e3[1]+v.z*e3[2]; }
+  const cr=[];
+  for(let i=0;i<n;i++){ const i2=(i+1)%n, ax=X[i], ay=Y[i], bx=X[i2]-ax, by=Y[i2]-ay;
+    for(let j=i+2;j<n;j++){ if(i===0&&j===n-1) continue; const j2=(j+1)%n, cx=X[j], cy=Y[j], dx=X[j2]-cx, dy=Y[j2]-cy, den=bx*dy-by*dx; if(Math.abs(den)<1e-14) continue;
+      const t=((cx-ax)*dy-(cy-ay)*dx)/den, u=((cx-ax)*by-(cy-ay)*bx)/den; if(!(t>1e-9&&t<1-1e-9&&u>1e-9&&u<1-1e-9)) continue;
+      const zi=Z[i]+(Z[i2]-Z[i])*t, zj=Z[j]+(Z[j2]-Z[j])*u; if(Math.abs(zi-zj)<1e-12) return null;   // вырожденная проекция
+      cr.push({sA:i+t, sB:j+u, over: zi>zj?'A':'B', dirA:[bx,by], dirB:[dx,dy]}); } }
+  return {pd:_pdFromCross(cr), n:cr.length};
+}
+const SIMP_DIRS=12, SIMP_RESTARTS=24, SIMP_R3=800, SIMP_MS=4000, SIMP_TOTAL_MS=20000, SIMP_FR_ITERS=1000, SIMP_ROUNDS=3, SIMP_ANG_MIN=40, SIMP_PX_MIN=30;   // проекций, перезапусков упрощения от лучшего кандидата, терпение R3 на перезапуск, бюджет времени перезапусков и всего Stir (мс), итераций расталкивания, раундов (разные зёрна), наименьший угол прядей в рисунке (°), наименьшее расстояние между пересечениями в рисунке (px)   // проекций (3 главные оси + случайные), перезапусков упрощения от лучшей, терпение R3 на перезапуск
+function _simpRnd(seed){ let s=seed|0; return ()=>{ s=(Math.imul(s,1103515245)+12345)&0x7fffffff; return s/0x80000000; }; }
+// лучшая упрощённая диаграмма: кандидаты — PD текущей 2D-диаграммы и PD проекций 3D-формы; возвращает {L, src, n0src, r3}
+function _simpBest(vs, cr2d, seed){
+  const rnd=_simpRnd(seed), cands=[];
+  if(cr2d && cr2d.length) cands.push({src:'diagram', pd:_pdFromCross(cr2d.map(c=>({sA:c.sA, sB:c.sB, over:c.over, dirA:[c.dirA.x,-c.dirA.y], dirB:[c.dirB.x,-c.dirB.y]})))});
+  if(vs && vs.length>3){
+    const dirs=[]; for(let t=0;t<SIMP_DIRS;t++){ let d=(t<3)? [t===2?1:0.0013*(1+rnd()), t===1?1:0.0007*(1+rnd()), t===0?1:0.0011*(1+rnd())] : [rnd()-0.5,rnd()-0.5,rnd()-0.5];   // оси — с крошечным наклоном: проекция лифта вдоль z вырождена (якоря кладут вершины обеих прядей в точку пересечения)
+      const l=Math.hypot(d[0],d[1],d[2])||1; dirs.push([d[0]/l,d[1]/l,d[2]/l]); }
+    for(const d of dirs){ const a=Math.abs(d[0])<0.9?[1,0,0]:[0,1,0];
+      let e1=[d[1]*a[2]-d[2]*a[1], d[2]*a[0]-d[0]*a[2], d[0]*a[1]-d[1]*a[0]]; const l1=Math.hypot(e1[0],e1[1],e1[2])||1; e1=[e1[0]/l1,e1[1]/l1,e1[2]/l1];
+      const e2=[d[1]*e1[2]-d[2]*e1[1], d[2]*e1[0]-d[0]*e1[2], d[0]*e1[1]-d[1]*e1[0]];   // e2=d×e1 ⇒ e1×e2=d
+      const r=_pdProject(vs, e1, e2, d); if(r) cands.push({src:'proj', pd:r.pd}); } }
+  const now=()=>(typeof performance!=='undefined' && performance.now)? performance.now() : Date.now(); const t0=now();
+  const nDiag=(cr2d && cr2d.length)? cr2d.length : Infinity;
+  let best=null;   // отбор: короткое упрощение каждого кандидата (проекции гуще диаграммы втрое пропускаются), затем перезапуски от лучшего исходника
+  for(const c of cands){ let L; try{ L=new RMoves.Link(c.pd); if(!L.valid()) continue; }catch(e){ continue; }
+    const n0=L.size(); if(n0>3*nDiag+20) continue; const r=L.clone().simplify({r3Budget:Math.min(SIMP_R3, 200), rnd});
+    if(!best || r.best.size()<best.L.size()) best={L:r.best, src:c.src, n0src:n0, r3:r.r3moves, L0:L}; }
+  if(!best) return null;
+  for(let t=0; t<SIMP_RESTARTS && best.L.size()>0 && now()-t0<SIMP_MS; t++){ const r=best.L0.clone().simplify({r3Budget:SIMP_R3, rnd}); if(r.best.size()<best.L.size()){ best.L=r.best; best.r3=r.r3moves; } }
+  return best;
+}
+// ПЛАНАРНАЯ УКЛАДКА диаграммы L: вершины — пересечения (0..n-1), по две «пустышки» на дугу (граф простой) и по вершине в каждой
+// внутренней грани (стеллирование: 2-связная карта → простая триангуляция → 3-связна, вложение Татта не вырождается). Внешняя грань
+// (самая длинная) не закрепляется сама: вокруг её обхода ставится КОЛЬЦО вершин на окружности (по одной на вершину обхода, полоса
+// между обходом и кольцом триангулирована), так что все пересечения и пустышки — строго внутри, с полными веерами. Свободные
+// вершины — барицентры соседей (сопряжённые градиенты), затем расталкивание Фрухтермана–Рейнгольда с проверкой ядра звезды (все
+// треугольники веера вокруг вершины остаются положительно ориентированы — планарность сохраняется по построению).
+// Возвращает {P:[[x,y]…] по всем вершинам (математические координаты), n, nb, d1(a), d2(a), L} или null.
+let _simpWhy='';   // причина последней неудачи укладки
+function _simpLayout(L, outerRank){
+  const n=L.cr.length; if(!n) return null;
+  const F=L.faces(); if(F.length!==n+2){ _simpWhy='not planar'; return null; }
+  const arcIds=[...L.arcs.keys()], aIdx=new Map(arcIds.map((a,k)=>[a,k])), nA=arcIds.length;
+  const faceOf=Array.from({length:n},()=>[0,0,0,0]); F.forEach((f,fi)=>{ for(const [c,p] of f) faceOf[c][p]=fi; });
+  const order=F.map((f,fi)=>fi).sort((a,b)=>F[b].length-F[a].length); const outer=order[Math.min(outerRank||0, order.length-1)];
+  const walkOf=(f)=>{ const walk=[]; for(const [c,p] of f){ const a=L.cr[c].e[p]; walk.push(c); if(L.cr[c].d[p]<0){ walk.push(n+2*aIdx.get(a)); walk.push(n+2*aIdx.get(a)+1); } else { walk.push(n+2*aIdx.get(a)+1); walk.push(n+2*aIdx.get(a)); } } return walk; };
+  const W=walkOf(F[outer]), m=W.length; if(new Set(W).size!==m){ _simpWhy='outer face touches itself'; return null; }   // внешняя грань с повторами (точка сочленения) — эту грань не берём
+  const NV=n+2*nA+F.length+m, RING=n+2*nA+F.length;   // вершина внешней грани (fv(outer)) остаётся в нумерации, но не используется
+  const d1=(a)=> n+2*aIdx.get(a), d2=(a)=> n+2*aIdx.get(a)+1, fv=(fi)=> n+2*nA+fi, rv=(k)=> RING+((k%m)+m)%m;
+  const nb=Array.from({length:NV},()=>[]);   // соседи против часовой стрелки
+  for(let c=0;c<n;c++) for(let p=0;p<4;p++){ const a=L.cr[c].e[p]; nb[c].push(L.cr[c].d[p]<0? d1(a) : d2(a)); nb[c].push(fv(faceOf[c][(p+1)%4])); }
+  for(const [a,r] of L.arcs){ const ct=r.t[0], pt=r.t[1], ch=r.h[0], ph=r.h[1], f1=fv(faceOf[ct][pt]), f2=fv(faceOf[ch][ph]);   // f1 — справа от хода ct→ch
+    nb[d1(a)]=[ct, f1, d2(a), f2]; nb[d2(a)]=[d1(a), f1, ch, f2]; }
+  F.forEach((f,fi)=>{ if(fi!==outer) nb[fv(fi)]=walkOf(f).reverse(); });
+  // кольцо: вершина обхода W[k] вместо внешней грани получает соседей r_k, r_{k+1} (против часовой: от прихода к уходу)
+  const FO=fv(outer); W.forEach((v,k)=>{ const N=nb[v], i=N.indexOf(FO); if(i<0) throw new Error('ring: walk vertex without outer corner'); N.splice(i,1,rv(k),rv(k+1)); });
+  const R=1000, P=Array.from({length:NV},()=>[0,0]), pinned=new Uint8Array(NV); pinned[FO]=1;
+  for(let k=0;k<m;k++){ const ang=2*Math.PI*k/m; P[rv(k)]=[R*Math.cos(ang), R*Math.sin(ang)]; pinned[rv(k)]=1; nb[rv(k)]=[rv(k+1), W[k], W[(k-1+m)%m], rv(k-1)]; }
+  const free=[]; for(let v=0;v<NV;v++) if(!pinned[v]) free.push(v);
+  // Татт: x_v — среднее соседей (выпуклая комбинация; теорема Татта верна при любых положительных весах). Рёбра к вершинам
+  // граней со стороны границы — с малым весом wF (иначе вершина большой грани стягивает границу к центру: при wF=1 ближайшие
+  // пересечения Хакена на 0.003·R, при 0.01 — на 7·R/1000). Перевзвешивание по длинам рёбер (w=(len/mean)^α) пробовалось — ухудшает.
+  // Несимметричная система → Гаусс–Зейдель с релаксацией ω=1.6
+  const CFG=Object.assign({wF:0.01, fr:SIMP_FR_ITERS, ell:1.2, mu:2, rep:0.1, ang:16, face:0.5}, window.__simpTutte||{});   // подобрано на Хакене (83 пересечения): наименьшее расстояние между пересечениями 7 → 58 (R=1000), наименьший угол прядей 2° → 28° за ~1000 итераций L-BFGS (2.5 с)   // стенд: подбор параметров
+  const FV0=n+2*nA, WT=nb.map(()=>null);
+  for(const v of free){ const N=nb[v], w=new Float64Array(N.length); for(let k=0;k<N.length;k++){ const u=N[k]; w[k]=(v<FV0 && u>=FV0 && u<RING)? CFG.wF : 1; } WT[v]=w; }
+  { let mx=0; for(let it=0; it<20000; it++){ mx=0;
+      for(const v of free){ const N=nb[v], w=WT[v]; let sx=0, sy=0, sw=0; for(let k=0;k<N.length;k++){ const u=N[k]; sx+=w[k]*P[u][0]; sy+=w[k]*P[u][1]; sw+=w[k]; }
+        const dx=sx/sw-P[v][0], dy=sy/sw-P[v][1]; P[v][0]+=1.6*dx; P[v][1]+=1.6*dy; const m=Math.abs(dx)+Math.abs(dy); if(m>mx) mx=m; }
+      if(mx<1e-7*R) break; } }
+  const area=(a,b,c)=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+  const fanMin=(v,q)=>{ const N=nb[v]; let m=Infinity, km=0; for(let k=0;k<N.length;k++){ const s=area(q, P[N[k]], P[N[(k+1)%N.length]]); if(s<m){ m=s; km=k; } } fanMin.k=km; return m; };
+  { let pos=0, neg=0; for(const v of free){ const N=nb[v]; for(let k=0;k<N.length;k++){ const s=area(P[v], P[N[k]], P[N[(k+1)%N.length]]); if(s>0) pos++; else if(s<0) neg++; } }
+    if(pos===0 && neg>0){ for(const q of P) q[0]=-q[0]; }   // зеркало: карта против часовой оказалась по часовой
+    else if(neg>0 || pos===0){ _simpWhy='Tutte embedding mixed orientation ('+pos+'+/'+neg+'−)'; return null; } }
+  for(const v of free) if(!(fanMin(v, P[v])>0)){ _simpWhy='Tutte embedding degenerate fan at vertex '+v+(v<n? ' (crossing)' : ''); return null; }
+  const _stat=(tag)=>{ if(!window.__simpStats) return; let dmin=Infinity, emin=Infinity; for(let a=0;a<n;a++) for(let b=a+1;b<n;b++){ const d=Math.hypot(P[a][0]-P[b][0],P[a][1]-P[b][1]); if(d<dmin) dmin=d; }
+    for(let v=0;v<FV0;v++) for(const u of nb[v]){ if(u>=FV0 && u<RING) continue; const d=Math.hypot(P[u][0]-P[v][0],P[u][1]-P[v][1]); if(d<emin) emin=d; } let amin=90; for(let c=0;c<n;c++){ const cr=L.cr[c], dm=(p)=>cr.d[p]>0? d2(cr.e[p]) : d1(cr.e[p]); const a=P[dm(0)], b=P[dm(2)], p=P[dm(1)], q=P[dm(3)]; const ux=b[0]-a[0], uy=b[1]-a[1], wx=q[0]-p[0], wy=q[1]-p[1]; const f=Math.abs(ux*wx+uy*wy)/((Math.hypot(ux,uy)||1e-9)*(Math.hypot(wx,wy)||1e-9)); const ang=Math.acos(Math.min(1,f))*180/Math.PI; if(ang<amin) amin=ang; }
+    window.__simpStats.push({tag, dmin, emin, amin}); };
+  _stat('tutte');
+  // РАСТАЛКИВАНИЕ с сохранением планарности — градиентный спуск по энергии E = пружины на рёбрах диаграммы + отталкивание вершин
+  // диаграммы (и кольца) + ЛОГ-БАРЬЕР по площадям всех треугольников триангуляции (−μ·Σ log(area/ell²)): барьер бесконечен на
+  // нулевой площади, шаг с откатом (пока все площади > 0 и энергия не растёт) — планарность сохраняется, а тесные скопления
+  // растут СОГЛАСОВАННО (жадные покоординатные сдвиги с жёстким ограничением веера запирали друг друга — тупик 5.0-dev)
+  { const ell=CFG.ell*R/Math.sqrt(FV0+m), T=CFG.fr, mu=CFG.mu*ell*ell, kRep=CFG.rep*ell*ell*ell;
+    const diag=[]; for(let v=0;v<FV0;v++) diag.push(v); const act=diag.concat(Array.from({length:m},(_,k)=>rv(k)));
+    const tri=[], seenT=new Set(); for(const v of free){ const N=nb[v]; for(let k=0;k<N.length;k++){ const t=[v,N[k],N[(k+1)%N.length]]; const key=t.slice().sort((a,b)=>a-b).join(','); if(seenT.has(key)) continue; seenT.add(key); tri.push(t); } }
+    const edges=[]; for(const v of free){ if(v>=FV0) continue; for(const u of nb[v]){ if(u>=FV0 && u<RING) continue; if(u<FV0 && u<v && !pinned[u]) continue; edges.push([v,u]); } }   // каждое ребро диаграммы один раз (к закреплённым — всегда)
+    const fedges=[]; for(const v of free){ if(v<FV0 || v>=RING) continue; const k=nb[v].length, rf=ell/(2*Math.sin(Math.PI/Math.max(3,k))); for(const u of nb[v]) fedges.push([v,u,rf]); }   // «круглые грани»: вершина грани держит границу на радиусе правильного k-угольника со стороной ell — двуугольники не схлопываются в щель (косичка рисовалась пилой)
+    const kFace=CFG.face;
+    const kAng=CFG.ang*ell*ell, crossQ=[];   // [пустышка входа нижней, выхода нижней, входа верхней, выхода верхней] у каждого пересечения
+    for(let c=0;c<n;c++){ const cr=L.cr[c], dm=(p)=>cr.d[p]>0? d2(cr.e[p]) : d1(cr.e[p]); const ov=cr.d[1]>0? [1,3] : [3,1]; crossQ.push([dm(0), dm(2), dm(ov[0]), dm(ov[1]), cr.d[1]>0? 1 : -1]); }   // s0 — знак u×w при верной ориентации (проверено по вложению Татта: 83 из 84 пересечений Хакена)
+    const G=new Float64Array(2*NV); const isFree=new Uint8Array(NV); for(const v of free) isFree[v]=1;
+    const energy=(withGrad)=>{ let E=0; if(withGrad) G.fill(0);
+      for(const [v,u] of edges){ const dx=P[v][0]-P[u][0], dy=P[v][1]-P[u][1], d=Math.hypot(dx,dy)||1e-9; E+=0.5*(d-ell)*(d-ell); if(withGrad){ const g=(d-ell)/d; if(isFree[v]){ G[2*v]+=g*dx; G[2*v+1]+=g*dy; } if(isFree[u]){ G[2*u]-=g*dx; G[2*u+1]-=g*dy; } } }
+      for(const [v,u,rf] of fedges){ const dx=P[v][0]-P[u][0], dy=P[v][1]-P[u][1], d=Math.hypot(dx,dy)||1e-9; E+=0.5*kFace*(d-rf)*(d-rf); if(withGrad){ const g=kFace*(d-rf)/d; if(isFree[v]){ G[2*v]+=g*dx; G[2*v+1]+=g*dy; } if(isFree[u]){ G[2*u]-=g*dx; G[2*u+1]-=g*dy; } } }
+      for(let i=0;i<act.length;i++){ const v=act[i]; for(let j=i+1;j<act.length;j++){ const u=act[j]; if(!isFree[v] && !isFree[u]) continue; const dx=P[v][0]-P[u][0], dy=P[v][1]-P[u][1], d2=dx*dx+dy*dy+1e-12, d=Math.sqrt(d2); E+=kRep/d;
+        if(withGrad){ const g=-kRep/(d2*d); if(isFree[v]){ G[2*v]+=g*dx; G[2*v+1]+=g*dy; } if(isFree[u]){ G[2*u]-=g*dx; G[2*u+1]-=g*dy; } } } }
+      for(const [a,b,p,q,s0] of crossQ){ const ux=P[b][0]-P[a][0], uy=P[b][1]-P[a][1], wx=P[q][0]-P[p][0], wy=P[q][1]-P[p][1]; const lu=Math.hypot(ux,uy)||1e-9, lw=Math.hypot(wx,wy)||1e-9; const qv=(ux*wy-uy*wx)/(lu*lw); E+=kAng*(1-s0*qv);   // угол пересечения: 1−sin θ (со знаком вращательной системы) — у параллельных прядей градиент наибольший (cos² давал там нулевой градиент и не раскрывал косичку)
+        if(withGrad){ const c=-kAng*s0; const dux=c*(wy/(lu*lw)-qv*ux/(lu*lu)), duy=c*(-wx/(lu*lw)-qv*uy/(lu*lu)), dwx=c*(-uy/(lu*lw)-qv*wx/(lw*lw)), dwy=c*(ux/(lu*lw)-qv*wy/(lw*lw));
+          if(isFree[b]){ G[2*b]+=dux; G[2*b+1]+=duy; } if(isFree[a]){ G[2*a]-=dux; G[2*a+1]-=duy; } if(isFree[q]){ G[2*q]+=dwx; G[2*q+1]+=dwy; } if(isFree[p]){ G[2*p]-=dwx; G[2*p+1]-=dwy; } } }
+      for(const [a,b,c] of tri){ const A=P[a], B=P[b], C=P[c]; const ar=(B[0]-A[0])*(C[1]-A[1])-(B[1]-A[1])*(C[0]-A[0]); if(!(ar>0)) return Infinity; E-=mu*Math.log(ar/(ell*ell));
+        if(withGrad){ const g=-mu/ar; if(isFree[a]){ G[2*a]+=g*(B[1]-C[1]); G[2*a+1]+=g*(C[0]-B[0]); } if(isFree[b]){ G[2*b]+=g*(C[1]-A[1]); G[2*b+1]+=g*(A[0]-C[0]); } if(isFree[c]){ G[2*c]+=g*(A[1]-B[1]); G[2*c+1]+=g*(B[0]-A[0]); } } }
+      return E; };
+    // L-BFGS (история 10) с откатом по Армихо; барьер даёт E=∞ при перевороте треугольника — шаг делится
+    const nf=free.length, X=new Float64Array(2*nf), g=new Float64Array(2*nf), Xn=new Float64Array(2*nf), gn=new Float64Array(2*nf), dir=new Float64Array(2*nf);
+    const pull=(dst)=>{ for(let k=0;k<nf;k++){ const v=free[k]; dst[2*k]=G[2*v]; dst[2*k+1]=G[2*v+1]; } };
+    const push=(src)=>{ for(let k=0;k<nf;k++){ const v=free[k]; P[v][0]=src[2*k]; P[v][1]=src[2*k+1]; } };
+    for(let k=0;k<nf;k++){ const v=free[k]; X[2*k]=P[v][0]; X[2*k+1]=P[v][1]; }
+    if(window.__simpGradCheck){ const E=energy(true); const Gc=Float64Array.from(G); const rep=[]; for(const v of free.slice(0,40)){ for(let ax=0;ax<2;ax++){ const h=1e-4*ell; const o=P[v][ax]; P[v][ax]=o+h; const Ep=energy(false); P[v][ax]=o-h; const Em=energy(false); P[v][ax]=o; const num=(Ep-Em)/(2*h); rep.push({v, ax, kind:v<n?'cr':v<FV0?'d':'F', an:+Gc[2*v+ax].toFixed(4), num:+num.toFixed(4)}); } } window.__simpGradCheck=rep; }
+    let E0=energy(true); pull(g); const S=[], Y=[], RHO=[], M=10; let stepInit=1;
+    for(let it=0; it<T && isFinite(E0); it++){
+      // двухпетлевая рекурсия
+      for(let i=0;i<2*nf;i++) dir[i]=-g[i]; const al=new Array(S.length);
+      for(let j=S.length-1;j>=0;j--){ let sd=0; for(let i=0;i<2*nf;i++) sd+=S[j][i]*dir[i]; al[j]=RHO[j]*sd; for(let i=0;i<2*nf;i++) dir[i]-=al[j]*Y[j][i]; }
+      if(S.length){ const j=S.length-1; let yy=0, sy=0; for(let i=0;i<2*nf;i++){ yy+=Y[j][i]*Y[j][i]; sy+=S[j][i]*Y[j][i]; } const gam=sy/yy; for(let i=0;i<2*nf;i++) dir[i]*=gam; }
+      else { let gmax=0; for(let i=0;i<2*nf;i++) gmax=Math.max(gmax, Math.abs(dir[i])); if(gmax>0) for(let i=0;i<2*nf;i++) dir[i]*=0.05*ell/gmax; }
+      for(let j=0;j<S.length;j++){ let yd=0; for(let i=0;i<2*nf;i++) yd+=Y[j][i]*dir[i]; const be=RHO[j]*yd; for(let i=0;i<2*nf;i++) dir[i]+=S[j][i]*(al[j]-be); }
+      let gd=0; for(let i=0;i<2*nf;i++) gd+=g[i]*dir[i]; if(!(gd<0)){ S.length=0; Y.length=0; RHO.length=0; let gmax=0; for(let i=0;i<2*nf;i++){ dir[i]=-g[i]; gmax=Math.max(gmax, Math.abs(g[i])); } if(!(gmax>0)) break; for(let i=0;i<2*nf;i++) dir[i]*=0.05*ell/gmax; gd=0; for(let i=0;i<2*nf;i++) gd+=g[i]*dir[i]; }
+      let t=1, E1=Infinity, ok=false;
+      for(let h=0; h<40; h++){ for(let i=0;i<2*nf;i++) Xn[i]=X[i]+t*dir[i]; push(Xn); E1=energy(false); if(E1<=E0+1e-4*t*gd){ ok=true; break; } t*=0.5; }
+      if(!ok){ push(X); if(S.length){ S.length=0; Y.length=0; RHO.length=0; continue; } break; }
+      energy(true); pull(gn);
+      const sv=new Float64Array(2*nf), yv=new Float64Array(2*nf); let sy=0; for(let i=0;i<2*nf;i++){ sv[i]=Xn[i]-X[i]; yv[i]=gn[i]-g[i]; sy+=sv[i]*yv[i]; }
+      if(sy>1e-12){ S.push(sv); Y.push(yv); RHO.push(1/sy); if(S.length>M){ S.shift(); Y.shift(); RHO.shift(); } }
+      X.set(Xn); g.set(gn); E0=E1;
+      if(window.__simpStats && (it%100===99)) _stat('lb'+(it+1)); } }
+  return {P, n, nb, d1, d2, L};
+}
+// новая 2D-диаграмма программы из укладки; возвращает {ok, why, n} — при неудаче прежняя диаграмма восстановлена
+function _simpApplyLayout(lay, detExpect){
+  const L=lay.L, n=lay.n, P=lay.P, d1=lay.d1, d2=lay.d2;
+  const S={raw, smooth, crossings, cumLen, totalLen2D, closedCurve, cap:_smoothCap};
+  const restore=()=>{ if(window.__simpKeep) return; raw=S.raw; smooth=S.smooth; crossings=S.crossings; cumLen=S.cumLen; totalLen2D=S.totalLen2D; closedCurve=S.closedCurve; _smoothCap=S.cap; };
+  const w=(drawCv.clientWidth>4)?drawCv.clientWidth:((drawCv.width>4)?drawCv.width:800), h=(drawCv.clientHeight>4)?drawCv.clientHeight:((drawCv.height>4)?drawCv.height:600);
+  if(n===0){ const pts=[]; for(let k=0;k<240;k++){ const a=2*Math.PI*k/240; pts.push({x:Math.cos(a), y:Math.sin(a)}); }
+    _smoothCap=1000; raw=fitToCanvas(pts, 0.6, false); closedCurve=false; drawing=false; finishCurve(true, true);
+    if(!closedCurve || crossings.length!==0){ restore(); return {ok:false, why:'circle diagram failed'}; }
+    updateCrossInfo(); updateKnotType(); return {ok:true, n:0}; }
+  // маршрут: от дуги e[0] пересечения 0, через голову дуги по пряди дальше; точки — пустышка дуги, затем пересечение как два
+  // конца короткого прямого отрезка ±ε вдоль пряди (обе пряди пересекаются ровно в точке пересечения, без общей вершины ломаной)
+  let mnx=Infinity,mxx=-Infinity,mny=Infinity,mxy=-Infinity;   // рамка — по пересечениям и пустышкам (вершины граней в рисунок не входят)
+  for(let v=0; v<n+2*L.arcs.size; v++){ const q=P[v]; mnx=Math.min(mnx,q[0]); mxx=Math.max(mxx,q[0]); mny=Math.min(mny,q[1]); mxy=Math.max(mxy,q[1]); }
+  let sc=0.9*Math.min(w/Math.max(1e-9,mxx-mnx), h/Math.max(1e-9,mxy-mny)); const cx=(mnx+mxx)/2, cy=(mny+mxy)/2;
+  // масштаб: если ближайшие пересечения оказались бы ближе SIMP_PX_MIN px, рисунок увеличивается (до ×3) — диаграмма выходит за холст,
+  // вид 2D сам сжимается (fitView, как при сужении панели); сплайн и распознавание пересечений работают в px, им нужен простор
+  { let dmin=Infinity; for(let a=0;a<n;a++) for(let b=a+1;b<n;b++){ const d=Math.hypot(P[a][0]-P[b][0], P[a][1]-P[b][1]); if(d<dmin) dmin=d; }
+    const f=Math.min(3, Math.max(1, SIMP_PX_MIN/Math.max(1e-9, dmin*sc))); sc*=f; }
+  const scr=(q)=>({x:w/2+(q[0]-cx)*sc, y:h/2-(q[1]-cy)*sc});   // экран: y вниз
+  const path=[], plan=[];   // plan[c]={x,y, tOver:{x,y}, tUnder:{x,y}} в экранных координатах
+  // касательные обеих прядей в пересечении c (экран): по пустышкам входа и выхода; если угол между прядями меньше SIMP_ANG_MIN,
+  // обе поворачиваются симметрично от биссектрисы (циклический порядок концов сохраняется) — сплайн у пологого пересечения давал
+  // лишние пересечения (пряди почти параллельны на десятки px, любая волна сплайна режет их трижды)
+  const _tanCache=new Map();
+  const _simpTangents=(c)=>{ if(_tanCache.has(c)) return _tanCache.get(c); const cr=L.cr[c]; const dm=(q)=>cr.d[q]>0? d2(cr.e[q]) : d1(cr.e[q]); const ov=cr.d[1]>0? [1,3] : [3,1];
+    const dirOf=(qi,qo)=>{ const A=scr(P[dm(qi)]), B=scr(P[dm(qo)]); let x=B.x-A.x, y=B.y-A.y; const l=Math.hypot(x,y)||1; return {x:x/l, y:y/l}; };
+    let tu=dirOf(0,2), to=dirOf(ov[0],ov[1]);
+    const dot=tu.x*to.x+tu.y*to.y, flip=dot<0; let t2=flip? {x:-to.x, y:-to.y} : to;   // t2 — направление верхней с острым углом к tu
+    const ang=Math.atan2(tu.x*t2.y-tu.y*t2.x, tu.x*t2.x+tu.y*t2.y), amin=SIMP_ANG_MIN*Math.PI/180;
+    if(Math.abs(ang)<amin){ const sgn=ang>=0? 1 : -1, d=(amin-Math.abs(ang))/2; const rot=(v,a)=>({x:v.x*Math.cos(a)-v.y*Math.sin(a), y:v.x*Math.sin(a)+v.y*Math.cos(a)});
+      tu=rot(tu, -sgn*d); t2=rot(t2, sgn*d); to=flip? {x:-t2.x, y:-t2.y} : t2; }   // обе прочь друг от друга: знак векторного произведения (порядок концов) сохраняется
+    const r=[tu,to]; _tanCache.set(c,r); return r; };
+  let a=L.cr[0].e[0]; const seen=new Set();
+  for(let guard=0; guard<2*n+2; guard++){ if(seen.has(a)) break; seen.add(a); const r=L.arcs.get(a); const [c,p]=r.h; const aNext=L.cr[c].e[(p+2)%4];
+    const D1=scr(P[d1(a)]), Din=scr(P[d2(a)]), C=scr(P[c]), Dout=scr(P[d1(aNext)]);
+    const t=_simpTangents(c)[p%2===0? 0 : 1]; const tx=t.x, ty=t.y;   // касательная пряди в C (у пологих пересечений — раздвинутая до SIMP_ANG_MIN)
+    const eps=Math.min(10, 0.3*Math.min(Math.hypot(C.x-Din.x,C.y-Din.y), Math.hypot(C.x-Dout.x,C.y-Dout.y)));
+    path.push(D1, Din, {x:C.x-eps*tx, y:C.y-eps*ty}, {x:C.x+eps*tx, y:C.y+eps*ty});
+    if(!plan[c]) plan[c]={x:C.x, y:C.y}; if(p%2===0) plan[c].tUnder={x:tx,y:ty}; else plan[c].tOver={x:tx,y:ty};
+    a=aNext; }
+  window.__simpLast={P, n, path, plan, nb:lay.nb};   // стенд: последняя укладка
+  if(seen.size!==2*n) { return {ok:false, why:'not a single component'}; }
+  const pts=[]; for(let k=0;k<path.length;k++){ const p0=path[k], p1=path[(k+1)%path.length]; const d=Math.hypot(p1.x-p0.x,p1.y-p0.y), m=Math.max(1, Math.ceil(d/6));
+    for(let t=0;t<m;t++) pts.push({x:p0.x+(p1.x-p0.x)*t/m, y:p0.y+(p1.y-p0.y)*t/m}); }
+  { let Lp=0; for(let k=0;k<path.length;k++){ const p0=path[k], p1=path[(k+1)%path.length]; Lp+=Math.hypot(p1.x-p0.x,p1.y-p0.y); } _smoothCap = n>40 ? Math.min(8000, Math.max(3000, Math.round(Lp/5))) : 1000; }   // точки сплайна через ~5 px
+  raw=pts; closedCurve=false; drawing=false; finishCurve(true, true);
+  if(!closedCurve){ restore(); return {ok:false, why:'curve did not close'}; }
+  if(crossings.length!==n){ const got=crossings.length;
+    if(window.__simpStats){ const far=[]; for(const c of crossings){ let bd=Infinity; for(let i=0;i<n;i++){ const d=Math.hypot(plan[i].x-c.x, plan[i].y-c.y); if(d<bd) bd=d; } if(bd>10) far.push([+c.x.toFixed(1), +c.y.toFixed(1), +bd.toFixed(1)]); } window.__simpStats.push({tag:'apply', got, n, far, plan:plan.map(q=>[+q.x.toFixed(1),+q.y.toFixed(1)])}); }
+    restore(); return {ok:false, why:'layout gave '+got+' crossings instead of '+n}; }
+  // сопоставление пересечений программы с планом по положению, проходы — по направлению верхней пряди
+  const used=new Uint8Array(n); let bad=0;
+  for(const c of crossings){ let bi=-1, bd=Infinity; for(let i=0;i<n;i++){ if(used[i]) continue; const d=Math.hypot(plan[i].x-c.x, plan[i].y-c.y); if(d<bd){ bd=d; bi=i; } }
+    if(bi<0 || bd>10){ bad++; continue; } used[bi]=1; const q=plan[bi];
+    const sA=(c.dirA.x*q.tOver.x+c.dirA.y*q.tOver.y)-(c.dirA.x*q.tUnder.x+c.dirA.y*q.tUnder.y), sB=(c.dirB.x*q.tOver.x+c.dirB.y*q.tOver.y)-(c.dirB.x*q.tUnder.x+c.dirB.y*q.tUnder.y);
+    if(sA*sB>=0){ bad++; continue; } c.over=(sA>0)?'A':'B'; c.pending=false; }
+  if(bad){ restore(); return {ok:false, why:bad+' crossings could not be matched to the layout'}; }
+  updateCrossInfo(); updateKnotType();
+  if(detExpect!==null && detExpect!==undefined && knotDet!==detExpect){ const d=knotDet; restore(); updateCrossInfo(); updateKnotType(); return {ok:false, why:'determinant changed ('+detExpect+' → '+d+')'}; }
+  return {ok:true, n};
+}
+// техника Stir «simplify» целиком: возвращает {ok, why, n0, n1, src, r3, ms}; при успехе диаграмма 2D и лифт заменены
+function stirSimplify(seed, detExpect){
+  const now=()=>(typeof performance!=='undefined' && performance.now)? performance.now() : Date.now(); const t0=now();
+  const n0=crossings.length; let last=null;
+  for(let round=0; round<SIMP_ROUNDS; round++){   // укладка или проверка диаграммы не удалась — другое зерно даёт другую диаграмму (иную проекцию, иные ходы)
+    const best=_simpBest(verts, closedCurve? crossings : null, (seed||1)+round*7919);
+    if(!best){ last={ok:false, why:'no valid diagram', n0}; break; }
+    const n1=best.L.size();
+    if(n1>n0){ last={ok:false, why:'no simpler diagram found ('+n1+' crossings after moves, diagram has '+n0+')', n0, n1, src:best.src}; continue; }
+    let r=null, why='layout failed', ranks=0; if(now()-t0>=SIMP_TOTAL_MS){ last={ok:false, why:'time budget of '+Math.round(SIMP_TOTAL_MS/1000)+' s spent without a valid diagram ('+(last? last.why : '')+')', n0, n1, src:best.src, rounds:round+1}; break; }
+    if(n1===0) r=_simpApplyLayout({P:[], n:0, L:best.L}, detExpect);
+    else for(let rank=0; rank<4 && !(r && r.ok) && now()-t0<SIMP_TOTAL_MS; rank++){ let lay=null;   // другая внешняя грань — другая укладка; каждая проверяется построением диаграммы
+      try{ _simpWhy=''; lay=_simpLayout(best.L, rank); if(!lay) why='layout failed: '+_simpWhy; }catch(e){ why='layout error: '+e.message; lay=null; }
+      if(!lay) continue; ranks++; r=_simpApplyLayout(lay, detExpect); if(!r.ok) why=r.why; }
+    if(!r){ last={ok:false, why, n0, n1, src:best.src, rounds:round+1}; continue; }
+    last=Object.assign({n0, n1, src:best.src, n0src:best.n0src, r3:best.r3, rounds:round+1, ranks}, r);
+    if(r.ok) break;
+  }
+  last.ms=Math.round(now()-t0); return last;
+}
+window.__simplify=(seed)=>stirSimplify(seed, null);   // стенд: упростить диаграмму без Stir (det не проверяется, только счёт пересечений)
 function stirStart(){
   if(running || _stir || !verts.length) return false;
   { const g=energyGrad(false);                       // ядро шире зазоров (ползунки сдвинуты после финала) — сдуть, стадия A раскроет заново
@@ -3411,9 +3788,17 @@ function stirStart(){
     const d0=_detRobust(3);
     _stirS0={verts:verts.map(v=>v.clone()), N, L0, det:(d0!==null? d0 : _runDet), s:sNominal()}; _stirN0=N;   // ядро — один раз (в воркере _thickFit другой); N0 — к нему возвращает фаза 3
     if(!same){ _stirHoles=[]; _stirSeed=1+Math.floor(Math.random()*1e6); } }
-  { const el=document.getElementById('stirMode'); if(el && (el.value==='loops'||el.value==='invert'||el.value==='open')) STIR_MODE=el.value; }   // пустой мок стенда режим не перекрывает
-  _stir.mode='remap?'; _stir.rej=[]; setStatus(STIR_MODE==='loops'? 'stirring… pulling loops out' : STIR_MODE==='open'? 'stirring… opening tight contacts' : 'stirring… turning inside out');
+  { const el=document.getElementById('stirMode'); if(el && (el.value==='loops'||el.value==='invert'||el.value==='open'||el.value==='simplify')) STIR_MODE=el.value; }   // пустой мок стенда режим не перекрывает
+  _stir.mode='remap?'; _stir.rej=[]; setStatus(STIR_MODE==='loops'? 'stirring… pulling loops out' : STIR_MODE==='open'? 'stirring… opening tight contacts' : STIR_MODE==='simplify'? 'simplifying the diagram…' : 'stirring… turning inside out');
   const run=()=>{ if(!_stir) return;
+    if(STIR_MODE==='simplify'){   // 5.0: упрощение диаграммы ходами Рейдемейстера — новая диаграмма 2D, новый лифт, серия попыток (как кнопка Physics)
+      const S0=_stirS0; const r=stirSimplify(_stirSeed++, S0? S0.det : null); _dbgStir=Object.assign({mode:'simplify'}, r);
+      if(!r.ok){ stirCancel(); stirEnable(true); const pill=document.getElementById('statusPill'); if(pill && pill.classList){ pill.classList.remove('run'); pill.classList.add('done'); } showError('simplify: '+r.why); return; }
+      const note=' · simplified: '+r.n0+' → '+r.n1+' crossings'+(r.src==='proj'? ' (from the 3D shape)' : '')+(r.n1===0? ' — unknot, circle diagram' : '');
+      autoThick(); updateCrossInfo(); renderDraw(); syncKnot3D();   // syncKnot3D → buildKnot3D: лифт, stirCancel, окна прежней серии
+      document.getElementById('hint').textContent = crossings.length ? 'Simplified diagram · drag the rope to reshape it · click a crossing to flip over/under.' : 'Simplified to a circle — the tries will finish it.';
+      if(verts.length){ startPhysics(); _stirNote=note; setStatus(runStatus()); } else { stirEnable(true); showError('simplify: lift failed'); }
+      return; }
     if(STIR_MODE==='open'){ _stirS0=null; _stirHoles=[]; _stirN0=0; _stir.mode='open'; stirFieldContacts(); setStatus(stirStatus()); return; }   // разжатие контактов: итеративное, как растаскивание
     let rm=null; for(let t=0; t<STIR_REMAP_TRIES && !rm; t++){ rm=stirRemapOnce(_stirSeed++); if(!rm){ _stir.rej.push(_stirLastRej); if(_stirTerminal(_stirLastRej)) break; } }
     if(rm){ _stir.mode=STIR_MODE; _stir.remap=rm; _stir.disp=rm.disp; _stir.i=1; stirFinish(); return; }
@@ -3559,7 +3944,7 @@ function parBest(P){   // лучший среди готовых результ�
 }
 function stirDeflateLive(){ updateGeomUnits(); const g=minSegGapRep(), sN=sNominal(); if(!(g>1.02*sN)) _inflate=Math.min(_inflate, Math.max(1e-4, g/(1.3*sN))); if(_stir) _stir.s=sN; }
 window.__knotStir=(k)=>{ if(!_stir && !stirStart()) return {started:false, running}; if(_stirPending){ const f=_stirPending; _stirPending=null; f(); } let c=0; while(_stir && c<(k||STIR_STEPS)){ stirStep(); c++; } return {stir:!!_stir, i:_stir?_stir.i:null, running, dbg:_dbgStir}; };
-window.__stirMode=(m)=>{ if(m==='loops'||m==='invert'||m==='open'){ STIR_MODE=m; const el=document.getElementById('stirMode'); if(el) el.value=m; } return STIR_MODE; };   // стенд: режим Stir до __knotStir
+window.__stirMode=(m)=>{ if(m==='loops'||m==='invert'||m==='open'||m==='simplify'){ STIR_MODE=m; const el=document.getElementById('stirMode'); if(el) el.value=m; } return STIR_MODE; };   // стенд: режим Stir до __knotStir
 window.__stirPin=(b)=>{ if(b!==undefined) STIR_PIN=!!b; return STIR_PIN; };   // стенд: пины до __knotStir (false — веер без фаз); в UI переключателя нет (2.40: пины всегда)
 function relaxStep(){
   if(!running || !verts.length) return;
@@ -4778,6 +5163,7 @@ function _workerSource(){
         _setVertsFrom(_vertsFromFlat(m.lift)); recenter(); _liftFromDiagram=false; _fromLift=false;
         knotDet=m.knotDet; isUnknot=!!m.isUnknot;
       } else if(m.diagram){
+        if(m.diagram.cap) _smoothCap=m.diagram.cap;   // 5.0: тот же потолок точек сплайна, что в главном потоке — иначе кривая воркера другая и проходы ложатся на другие пересечения
         raw=m.diagram.raw.map(p=>({x:p.x,y:p.y})); closedCurve=false; drawing=false; finishCurve(true);
         for(const w of m.diagram.crossings){ let bi=-1, bd=1e9; crossings.forEach((c,i)=>{ const dd=Math.hypot(c.x-w.x,c.y-w.y); if(dd<bd){ bd=dd; bi=i; } }); if(bi>=0 && bd<25) crossings[bi].over=w.over; }
         updateKnotType(); buildKnot3D();
@@ -4823,7 +5209,7 @@ function parStart(kind){
   const carry=_msCarry; _msCarry=null;
   const K=carry? Math.max(1, MULTI_START-1) : MULTI_START, W=Math.max(1, Math.min(K, (navigator.hardwareConcurrency||4)-1, 16));   // все попытки параллельно, если хватает ядер (до 16)
   const payload = kind==='diagram'
-    ? {diagram:{raw:raw.map(p=>({x:p.x,y:p.y})), crossings:crossings.map(c=>({x:c.x,y:c.y,over:c.over}))}}
+    ? {diagram:{raw:raw.map(p=>({x:p.x,y:p.y})), crossings:crossings.map(c=>({x:c.x,y:c.y,over:c.over})), cap:_smoothCap}}
     : {lift:(()=>{ const f=new Float32Array(N*3); for(let i=0;i<N;i++){ f[3*i]=verts[i].x; f[3*i+1]=verts[i].y; f[3*i+2]=verts[i].z; } return f; })()};
   if(!carry) msWinsClear();
   _msOffset=carry?1:0; _msEnergies=(carry? [carry.E] : []).concat(new Array(K).fill(undefined)); _msThick=carry? [thickOf(carry)] : []; _msBest=carry? {E:carry.E, verts:carry.verts, msg:carry.note, round:-1, thick:thickOf(carry)} : null;
@@ -5161,7 +5547,7 @@ document.getElementById('play').onclick=()=>{
   const rd=()=>{ const v=Math.round(+el.value); if(v>=1 && v<=20) MULTI_START=v; };
   const fix=()=>{ let v=Math.round(+el.value); if(!(v>=1)) v=MULTI_START; v=Math.max(1, Math.min(20, v)); el.value=String(v); MULTI_START=v; };
   if(el){ el.oninput=rd; el.onchange=fix; rd(); } }
-{ const el=document.getElementById('stirMode'); if(el){ el.value=STIR_MODE; el.onchange=()=>{ if(el.value==='loops'||el.value==='invert'||el.value==='inflate') STIR_MODE=el.value; }; } }
+{ const el=document.getElementById('stirMode'); if(el){ el.value=STIR_MODE; el.onchange=()=>{ if(el.value==='open'||el.value==='simplify'||el.value==='loops'||el.value==='invert') STIR_MODE=el.value; }; } }
 
 const bendCoefEl=document.getElementById('bendCoef'), repCoefEl=document.getElementById('repCoef');
 const thick=document.getElementById('thick');
@@ -5432,7 +5818,7 @@ window.__knotSetVerts=(arr)=>{ if(!arr||arr.length<8) return false; _liftFromDia
   N=verts.length; allocBuffers(); resampleEqualArc(); recenter();
   rebuildTube(); fitCamera(false); return {N,L0:+L0.toFixed(5)}; };
 // ВЕРСИЯ ИНТЕРФЕЙСА: X задаёт пользователь, Y растёт на 1 с каждой новой сборкой
-const APP_VER_MAJOR=4, APP_VER_MINOR=20;   // 4.14 (2026-09-20): импорт картинки с тонкими штрихами: если на рабочем размере (≤ 1000 px) кривая не сошлась (не замкнута, одинокие концы, несколько кусков), распознавание повторяется на полном размере (≤ 1600, как отдаёт ikLoadFile) и берётся лучший результат; потолок дальнего моста 3.5·medL; замыкание «open ends joined» — нижняя прядь под сплошными штрихами (пересечения известны, без белых кружков)   // 4.13 (2026-09-20): Repel ×2 — ползунок 1–10, физическое r = 2×ползунок, старт 5 (= прежние 10); импорт плотной диаграммы: ложные «разрывы пера» между концами РАЗНЫХ нижних прядей отсеиваются проверкой коллинеарности, плюс глобальное условие «одна замкнутая кривая» (_ikMergeCycles) — узел Хакена с картинки импортируется точно: 141 пересечение, det 1   // 4.12 (2026-09-20): кольца пересечений не слипаются: свыше 150 пересечений Random строит сетку вдвое плотнее (шаг 0.75 радиуса маркера, до 50×50), кольца и верёвочка мельчают по тесноте не более чем вдвое — каждое кольцо по своему соседу, верёвочка по медиане; клик и курсор берут ближайшее кольцо; волнистая кривая — запасной путь для низких окон с честным статусом   // 4.11 (2026-09-20): Random до 500 пересечений — выше 150 диаграмма строится волнистой кривой (сумма случайных гармоник), сетка столько на холст не вмещает   // 4.10 (2026-09-19): Stir «раздутие ×k» убран — замер показал, что за все 2100 шагов его расписания форма не меняется (радиус инерции 0.03 %, отпечаток формы 0.1 %): длина нити закреплена, энергия изгиба от масштаба не зависит, поэтому сжатие ядра просто выключало единственную силу, способную раздвинуть пряди. Вместо него Stir = разжатие тугих контактов: пары прядей с наименьшим зазором толкаются врозь колоколом вдоль нити, с прежними капами и сертификатами   // 4.9 (2026-09-19): жёсткость верёвочки под рукой зафиксирована на 8, ползунок Rigid. убран из панели 2D (пользователь выбрал значение и попросил убрать орган управления)   // 4.8 (2026-09-19): перетаскивание переписано как чистая геометрическая деформация: smooth[k] = base[k] + (курсор − точка захвата)·w[k], где w — колокол Гаусса по длине дуги от точки захвата, посчитанный один раз при захвате. Сумма гладких функций гладкая — ни острого угла у руки, ни «гармошки»; форма зависит только от положения курсора, а не от числа событий мыши   // 4.7 (2026-09-18): нижняя прядь у пересечения обрывается РОВНО и ВДОЛЬ верхней (круглый торец читался как обрубленная нитка): концевой участок куска плавно, кубикой, сводится к нормали верхней пряди, а ровный торец строится перпендикулярно последнему отрезку — то есть параллельно верхней пряди при любом угле пересечения   // 4.6 (2026-09-18): контактная отметина на срезе нижней пряди убрана (source-atop клал её и на тень верёвочки на бумаге — вдвое более широкую, и вместо тени выходил серый прямоугольник поперёк); перетаскивание: вязкость не действует там, где держит рука (точка обгоняла мышку, закрепление возвращало её — верёвочка ломалась углом ровно под рукой), на отпускании форма больше не меняется (ни «успокоения», ни пересборки сплайном — не было бы рывка), жёсткость по умолчанию 7   // 4.5 (2026-09-18): верёвочка в 2D без «чешуи» и швов — разрыв у пересечения не выстригается из готового рисунка, а РЕЖЕТСЯ сама кривая: каждый кусок рисуется ровно один раз (дважды положенные полупрозрачные слои давали чешую, ровные торцы дорисовки — тёмные волоски); рука тянет узел колоколом Гаусса (под рукой ход равен ходу мышки, вдали почти ноль) с ползунком жёсткости Rigid. 1–10   // 4.4 (2026-09-18): разрыв и кольцо у пересечения стали мелкими — «кто сверху» держится на тени верхней пряди; замкнутая диаграмма сразу в режиме редактирования: курсор-ладошка, узел берут рукой и тянут как верёвку (нерастяжимо, с упругостью и вязкостью), пересечения и выбранные проходы едут следом   // 4.3 (2026-09-18): верёвочка без «чешуи» — блик и притенение смещаются по НОРМАЛИ к кривой со стороны света, а не в одну сторону экрана; контактная тень — короткая отметина с затуханием на срезе нижней пряди, а не полоса вдоль всей верхней (она мазала соседние пряди тёмными штрихами); свивка убрана   // 4.2 (2026-09-18): картинку можно бросить прямо в поле 2D (кнопка Image переименована в Upload); линия в 2D — тонкая верёвочка: тень на бумаге, тёмная оплётка, светотень и блик, редкая свивка; пересечение режется ВДОЛЬ верхней пряди, и она кладёт контактную тень на срезы нижней   // 4.1 (2026-09-18): второй уровень порога включается только тогда, когда маска первого уровня не похожа на рисунок линией (мало чернил, короткая суммарная линия) — на фото с неровной чернильностью штриха бледные участки больше не теряются; зерно убирается медианой 3×3, а не средним (среднее затягивало узкие разрывы)   // 4.0 (2026-09-15): распознавание скетчей на бумаге — порог по второму уровню Оцу (у штриха есть тёмное ядро, у клетки, зерна и пятен нет), фон без сдвига у края кадра (рамка в морфологии, зеркало в сглаживании), чернильность по сглаженному 3×3 кадру, «упор» нижней пряди — по настоящему разрыву в маске, слияние вытянутого X при любом угле, мост длиннее привычного разрыва запрещён   // 3.9 (2026-09-15): пересечения картинки без видимого разрыва — белые кружки (проход не выбран), Physics недоступна до выбора всех; кнопка Stir — как Physics, но синяя   // 3.8 (2026-09-15): распознавание рисунка пером с двойным следом — «линза» и параллельная шпора в скелете, стык разрывов пера, без «ослабленных» мостов через весь рисунок, строгий второй проход для оставшихся концов   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
+const APP_VER_MAJOR=5, APP_VER_MINOR=0;   // 5.0 (2026-09-22, ветка v5): Stir «simplify» — проекция 3D-формы (и сама диаграмма) → PD-код → ходы Рейдемейстера R1/R2 жадно, R3 случайно (как simplify() Regina) → планарная укладка упрощённой диаграммы (Татт по стеллированной триангуляции + расталкивание с сохранением планарности) → новая диаграмма 2D с проходами по позициям → лифт → серия попыток; det до/после сверяется, при любой неудаче прежняя диаграмма остаётся   //   // 4.14 (2026-09-20): импорт картинки с тонкими штрихами: если на рабочем размере (≤ 1000 px) кривая не сошлась (не замкнута, одинокие концы, несколько кусков), распознавание повторяется на полном размере (≤ 1600, как отдаёт ikLoadFile) и берётся лучший результат; потолок дальнего моста 3.5·medL; замыкание «open ends joined» — нижняя прядь под сплошными штрихами (пересечения известны, без белых кружков)   // 4.13 (2026-09-20): Repel ×2 — ползунок 1–10, физическое r = 2×ползунок, старт 5 (= прежние 10); импорт плотной диаграммы: ложные «разрывы пера» между концами РАЗНЫХ нижних прядей отсеиваются проверкой коллинеарности, плюс глобальное условие «одна замкнутая кривая» (_ikMergeCycles) — узел Хакена с картинки импортируется точно: 141 пересечение, det 1   // 4.12 (2026-09-20): кольца пересечений не слипаются: свыше 150 пересечений Random строит сетку вдвое плотнее (шаг 0.75 радиуса маркера, до 50×50), кольца и верёвочка мельчают по тесноте не более чем вдвое — каждое кольцо по своему соседу, верёвочка по медиане; клик и курсор берут ближайшее кольцо; волнистая кривая — запасной путь для низких окон с честным статусом   // 4.11 (2026-09-20): Random до 500 пересечений — выше 150 диаграмма строится волнистой кривой (сумма случайных гармоник), сетка столько на холст не вмещает   // 4.10 (2026-09-19): Stir «раздутие ×k» убран — замер показал, что за все 2100 шагов его расписания форма не меняется (радиус инерции 0.03 %, отпечаток формы 0.1 %): длина нити закреплена, энергия изгиба от масштаба не зависит, поэтому сжатие ядра просто выключало единственную силу, способную раздвинуть пряди. Вместо него Stir = разжатие тугих контактов: пары прядей с наименьшим зазором толкаются врозь колоколом вдоль нити, с прежними капами и сертификатами   // 4.9 (2026-09-19): жёсткость верёвочки под рукой зафиксирована на 8, ползунок Rigid. убран из панели 2D (пользователь выбрал значение и попросил убрать орган управления)   // 4.8 (2026-09-19): перетаскивание переписано как чистая геометрическая деформация: smooth[k] = base[k] + (курсор − точка захвата)·w[k], где w — колокол Гаусса по длине дуги от точки захвата, посчитанный один раз при захвате. Сумма гладких функций гладкая — ни острого угла у руки, ни «гармошки»; форма зависит только от положения курсора, а не от числа событий мыши   // 4.7 (2026-09-18): нижняя прядь у пересечения обрывается РОВНО и ВДОЛЬ верхней (круглый торец читался как обрубленная нитка): концевой участок куска плавно, кубикой, сводится к нормали верхней пряди, а ровный торец строится перпендикулярно последнему отрезку — то есть параллельно верхней пряди при любом угле пересечения   // 4.6 (2026-09-18): контактная отметина на срезе нижней пряди убрана (source-atop клал её и на тень верёвочки на бумаге — вдвое более широкую, и вместо тени выходил серый прямоугольник поперёк); перетаскивание: вязкость не действует там, где держит рука (точка обгоняла мышку, закрепление возвращало её — верёвочка ломалась углом ровно под рукой), на отпускании форма больше не меняется (ни «успокоения», ни пересборки сплайном — не было бы рывка), жёсткость по умолчанию 7   // 4.5 (2026-09-18): верёвочка в 2D без «чешуи» и швов — разрыв у пересечения не выстригается из готового рисунка, а РЕЖЕТСЯ сама кривая: каждый кусок рисуется ровно один раз (дважды положенные полупрозрачные слои давали чешую, ровные торцы дорисовки — тёмные волоски); рука тянет узел колоколом Гаусса (под рукой ход равен ходу мышки, вдали почти ноль) с ползунком жёсткости Rigid. 1–10   // 4.4 (2026-09-18): разрыв и кольцо у пересечения стали мелкими — «кто сверху» держится на тени верхней пряди; замкнутая диаграмма сразу в режиме редактирования: курсор-ладошка, узел берут рукой и тянут как верёвку (нерастяжимо, с упругостью и вязкостью), пересечения и выбранные проходы едут следом   // 4.3 (2026-09-18): верёвочка без «чешуи» — блик и притенение смещаются по НОРМАЛИ к кривой со стороны света, а не в одну сторону экрана; контактная тень — короткая отметина с затуханием на срезе нижней пряди, а не полоса вдоль всей верхней (она мазала соседние пряди тёмными штрихами); свивка убрана   // 4.2 (2026-09-18): картинку можно бросить прямо в поле 2D (кнопка Image переименована в Upload); линия в 2D — тонкая верёвочка: тень на бумаге, тёмная оплётка, светотень и блик, редкая свивка; пересечение режется ВДОЛЬ верхней пряди, и она кладёт контактную тень на срезы нижней   // 4.1 (2026-09-18): второй уровень порога включается только тогда, когда маска первого уровня не похожа на рисунок линией (мало чернил, короткая суммарная линия) — на фото с неровной чернильностью штриха бледные участки больше не теряются; зерно убирается медианой 3×3, а не средним (среднее затягивало узкие разрывы)   // 4.0 (2026-09-15): распознавание скетчей на бумаге — порог по второму уровню Оцу (у штриха есть тёмное ядро, у клетки, зерна и пятен нет), фон без сдвига у края кадра (рамка в морфологии, зеркало в сглаживании), чернильность по сглаженному 3×3 кадру, «упор» нижней пряди — по настоящему разрыву в маске, слияние вытянутого X при любом угле, мост длиннее привычного разрыва запрещён   // 3.9 (2026-09-15): пересечения картинки без видимого разрыва — белые кружки (проход не выбран), Physics недоступна до выбора всех; кнопка Stir — как Physics, но синяя   // 3.8 (2026-09-15): распознавание рисунка пером с двойным следом — «линза» и параллельная шпора в скелете, стык разрывов пера, без «ослабленных» мостов через весь рисунок, строгий второй проход для оставшихся концов   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
 const APP_VERSION=APP_VER_MAJOR+'.'+APP_VER_MINOR;   // 3.0, 3.1, … (с 3.0 без дополнения нулём)
 window.__buildTag='v'+APP_VERSION;
 { const el=document.getElementById('appVer'); if(el) el.textContent=APP_VERSION; }

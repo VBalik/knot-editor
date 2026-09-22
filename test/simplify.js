@@ -1,4 +1,4 @@
-// 5.0 (стенд): STIR «SIMPLIFY» — упрощение диаграммы ходами Рейдемейстера в самой программе.
+// 5.0 (стенд): STIR «SIMPLIFY» — упрощение диаграммы ходами Рейдемейстера в самой программе. Запуск: KNOT_PAGE=index5.html node harness.js simplify.js
 // Узел: HK_FILE=out/hard/<name>.json (укладка PD, как в pdknot.js) или KNOT=trefoil|figure8|cinquefoil|septafoil (пресет).
 // SP_PRE=<шагов> — физика до Stir (0 — прямо из базового лифта; по умолчанию 3000), SP_ONLY=1 — только упрощение и проверка
 // диаграммы (без серии после), UK_STIR — число Stir-попыток (по умолчанию 6), UK_BUD — бюджет шагов на попытку, SP_PNG=<png> — вид 2D
