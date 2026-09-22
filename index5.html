@@ -2994,7 +2994,7 @@ window.__knotSaddle=()=>saddleEscape();
    отказов подряд — новые направления. Надувания ядра (стадия A 2.07) больше нет — по просьбе
    пользователя Stir делает только растаскивание. Разрыхлённая форма становится лифтом новой
    серии из Tries−1 попыток. ---- */
-const STIR_STEPS=600, STIR_AMP=1.0, STIR_REP=1.0, STIR_STALL=8;   // STIR_REP — вес силы отталкивания в поле (помогает раскрыть контакты)
+const STIR_EARLY=40, STIR_STEPS=600, STIR_AMP=1.0, STIR_REP=1.0, STIR_STALL=8;   // STIR_REP — вес силы отталкивания в поле (помогает раскрыть контакты)
 let _stir=null, _stirUx=null, _stirUy=null, _stirUz=null, _stirNote='', _stirWarn='', _stirEv=[], _stirX0=null;
 let _closeCollect=null, _closeThr=0, _segGap=null, _segGapRep=null;   // сбор близких чужих пар в energyGrad (плоский массив i,j,s,t,dx,dy,dz,x); _segGap — зазор каждого отрезка
 let _msStretchMild=false;   // после Stir растяжение стартов мягче (×0.7…×1.4): рыхлый лифт при сжатии ×0.4 заклинивает
@@ -3764,6 +3764,8 @@ function stirStep(){
   else { _stir.rejected++; _stir.rejB++; if(++_stir.stall>=STIR_STALL){ _stir.stall=0; stirRefield(); } }   // застряли — новое поле
   let d=0; for(let i=0;i<n;i++){ const q=verts[i].distanceTo(_stirX0[i]); if(q>d) d=q; } _stir.disp=d;   // наибольший сдвиг вершины от начала Stir
   _stir.i++;
+  if(_stir.mode==='open'){ const rj=(_stir.rejected!==_stir._rj0)? 1 : 0; _stir._rj0=_stir.rejected; _stir.rr=(_stir.rr===undefined? rj : 0.93*_stir.rr+0.07*rj); }   // доля отвергнутых шагов за последние ~15
+  if(_stir.mode==='open' && _stir.i>=STIR_EARLY && _stir.rr>0.8){ _stir.early=true; stirFinish(); return false; }   // 5.4: контакты не поддаются (≥80 % шагов отвергнуто) — не ждать 600 шагов (Хакен: ~10 с без движения), серия с волнами сразу
   if(_stir.mode==='moves' && _mv && !_mv.done && _stir.i%MV_CHECK===0 && _stir.i<_stir.n && _mvDone()){ _mv.log[_mv.log.length-1].steps=_stir.i; _mv.steps+=_stir.i; _stir.i=_stir.n; _mv.early=true; }   // ход достиг цели раньше лимита
   if(_stir.disp>=_stir.target || _stir.i>=_stir.n){ if(_stir.mode==='moves' && _mv && !_mv.done && _mvNext()) return true; stirFinish(); return false; }
   return true;
