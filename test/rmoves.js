@@ -75,8 +75,10 @@ Link.prototype.r2=function(f){
   const outer=(E1,E2,x)=>{ const inn=(E1[0]===x)? E2[0] : E1[0], out=(E1[1]===x)? E2[1] : E1[1]; return [inn,out]; };   // вход в участок и выход из него
   const [ai,ao]=outer(A1,A2,a), [bi,bo]=outer(B1,B2,b);
   this.arcs.delete(a); this.arcs.delete(b);
-  if(!this._merge(ai,ao)) this.arcs.delete(ai);
-  if(!this._merge(bi,bo)) this.arcs.delete(bi);
+  if(ao===bi && bo===ai){ this.arcs.delete(ai); this.arcs.delete(ao); }               // обе пряди — одна петля без других пересечений (компонента исчезает)
+  else if(ao===bi){ this.arcs.delete(ao); if(!this._merge(ai,bo)) this.arcs.delete(ai); }   // прядь A сразу возвращается прядью B: ai → bo
+  else if(bo===ai){ this.arcs.delete(bo); if(!this._merge(bi,ao)) this.arcs.delete(bi); }
+  else { if(!this._merge(ai,ao)) this.arcs.delete(ai); if(!this._merge(bi,bo)) this.arcs.delete(bi); }
   this.cr[c1]=null; this.cr[c2]=null; this._renumber(); return true;
 };
 Link.prototype.r3ok=function(f){ if(f.length!==3) return false; const cs=f.map(x=>x[0]); if(new Set(cs).size!==3) return false;
@@ -98,11 +100,30 @@ Link.prototype.r3=function(f){
     this.arcs.get(x).h=[Q[0],t.qin]; this.arcs.get(y).t=[P[0],t.pout]; }
   return true;
 };
-Link.prototype.reduce=function(){   // R1/R2 до упора; возвращает число снятых пересечений
+Link.prototype.nugatory=function(){   // убрать одно нугаторное пересечение (точку сочленения: грань проходит через него дважды); true — убрано
+  const F=this.faces();
+  for(const f of F){ const at=new Map(); for(let k=0;k<f.length;k++){ const [c,q]=f[k]; if(at.has(c)){ const q1=at.get(c); if(((q-q1)%4+4)%4!==2) continue;
+        // элемент [c,q] — приход по позиции q−1, уход по q: углы (q1−1→q1) и (q1+1→q1+2); стороны A={q1,q1+1}, B={q1+2,q1+3};
+        // соединяем p↔p+3 и p+1↔p+2 при p=q1 (каждая пара — по одной дуге с каждой стороны); сторона B при нужде переворачивается
+        const p=q1%4, cr=this.cr[c], pairs=[[p,(p+3)%4],[(p+1)%4,(p+2)%4]];
+        if(cr.d[p]===cr.d[(p+3)%4]){   // ориентации не стыкуются — перевернуть сторону B (поворот 1-тангла на π вокруг оси через его концы — изотопия)
+          const side=new Set(), stack=[]; for(const s of [(p+2)%4,(p+3)%4]){ const r=this.arcs.get(cr.e[s]); const o=(r.t[0]===c && r.t[1]===s)? r.h : r.t; if(o[0]!==c) stack.push(o[0]); }
+          while(stack.length){ const x=stack.pop(); if(x===c || side.has(x)) continue; side.add(x); for(let s=0;s<4;s++){ const o=this._other(x,s); if(o[0]!==c && !side.has(o[0])) stack.push(o[0]); } }
+          const arcsB=new Set(); for(const x of side) for(let s=0;s<4;s++) arcsB.add(this.cr[x].e[s]);
+          for(const x of side){ const X=this.cr[x]; X.e=[X.e[2],X.e[3],X.e[0],X.e[1]]; X.d=[-X.d[2],-X.d[3],-X.d[0],-X.d[1]]; }
+          for(const a of arcsB){ const r=this.arcs.get(a); const t=r.t, h=r.h; r.t=[h[0], side.has(h[0])? (h[1]+2)%4 : h[1]]; r.h=[t[0], side.has(t[0])? (t[1]+2)%4 : t[1]]; }
+          for(const s of [0,1,2,3]){ const a=cr.e[s], r=this.arcs.get(a); cr.d[s]=(r.h[0]===c && r.h[1]===s)? 1 : -1; } }   // концы у c: статус по перевёрнутым дугам
+        for(const [x,y] of pairs){ const ax=cr.e[x], ay=cr.e[y]; const inn=cr.d[x]>0? ax : ay, out=cr.d[x]>0? ay : ax; if(!this._merge(inn,out)) this.arcs.delete(inn); }
+        this.cr[c]=null; this._renumber(); return true; }
+      at.set(c,q); } }
+  return false;
+};
+Link.prototype.reduce=function(){   // R1/R2 и нугаторные пересечения — до упора; возвращает число снятых пересечений
   let removed=0, again=true;
   while(again && this.cr.length){ again=false; const F=this.faces();
     for(const f of F){ if(f.length===1){ const n0=this.cr.length; if(this.r1(f)){ removed+=n0-this.cr.length; again=true; break; } }
-      if(f.length===2 && this.r2ok(f)){ const n0=this.cr.length; if(this.r2(f)){ removed+=n0-this.cr.length; again=true; break; } } } }
+      if(f.length===2 && this.r2ok(f)){ const n0=this.cr.length; if(this.r2(f)){ removed+=n0-this.cr.length; again=true; break; } } }
+    if(!again && this.nugatory()){ removed++; again=true; } }
   return removed;
 };
 Link.prototype.simplify=function(opt){   // как Regina simplify(): R1/R2, затем случайные R3; лучший результат
