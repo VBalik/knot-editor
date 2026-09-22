@@ -53,11 +53,12 @@
   else if(PRE>0){ H.play(); let st=0; while(true){ const o=H.step(200); st+=200; if(!o.running || st>=PRE) break; } if(H.running()) H.play(); out.preSteps=st; }
   if(process.env.SP_SAVE){ fs.mkdirSync(path.dirname(process.env.SP_SAVE),{recursive:true}); fs.writeFileSync(process.env.SP_SAVE, JSON.stringify({name:out.name, N, verts:verts.map(v=>[+v.x.toFixed(5),+v.y.toFixed(5),+v.z.toFixed(5)])})); out.saved=process.env.SP_SAVE; }
   if(process.env.SP_SEED) _stirSeed=+process.env.SP_SEED;
-  const MODE=process.env.SP_MODE||'moves'; window.__stirMode(MODE); out.stirMode=STIR_MODE; H.set({ms:+(process.env.SP_TRIES||1)});   // SP_MODE=open|simplify|branch — сравнение техник; SP_TRIES — попыток в серии после Stir
+  if(process.env.SP_WAVES) window.__stirWaves(+process.env.SP_WAVES);   // 5.4: 1|2|3 — фиксированный вариант волн, 0 — по кругу
+  const MODE=process.env.SP_MODE||'open'; window.__stirMode(MODE); out.stirMode=STIR_MODE; H.set({ms:+(process.env.SP_TRIES||1)});   // SP_MODE=open|simplify|branch — сравнение техник; SP_TRIES — попыток в серии после Stir
   out.stirs=[]; let done=isCircle();
   for(let attempt=0; attempt<NSTIR && !done; attempt++){
     var _lastStirRet=window.__knotStir(); if(!_lastStirRet){ out.stirs.push({at:attempt, started:false}); break; } while(_stir) window.__knotStir();
-    const d=_dbgStir||{}; if(d.ok===undefined) d.ok=!d.tooTight; if(d.tooTight) d.why='too tight'; const rec={at:attempt, ok:d.ok, why:d.why, mode:d.mode, stirRet:JSON.stringify(_lastStirRet||null).slice(0,80), mv:d.mv||undefined, moves:d.moves? d.moves.map(m=>m.move+'@'+m.nc).join(' ') : undefined, det0:d.det0, det1:d.det1, nc:crossings.length, det:knotDet, running:H.running()};
+    const d=_dbgStir||{}; if(d.ok===undefined) d.ok=!d.tooTight; if(d.tooTight) d.why='too tight'; const rec={at:attempt, ok:d.ok, why:d.why, mode:d.mode, wvar:d.waveVar, tight:d.tooTight, stirRet:JSON.stringify(_lastStirRet||null).slice(0,80), mv:d.mv||undefined, moves:d.moves? d.moves.map(m=>m.move+'@'+m.nc).join(' ') : undefined, det0:d.det0, det1:d.det1, nc:crossings.length, det:knotDet, running:H.running()};
     if(attempt===0 && process.env.SP_PNG) rec.png=png(process.env.SP_PNG);
     if(process.env.UK_VERBOSE==='1') console.error(JSON.stringify(rec));
     if(!d.ok){ out.stirs.push(rec); if(process.env.SP_ONLY==='1') break; if(H.running()) H.play(); continue; }   // как пользователь: неудача — нажать Stir ещё раз (другое зерно)
