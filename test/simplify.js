@@ -2,7 +2,7 @@
 // Узел: HK_FILE=out/hard/<name>.json (укладка PD, как в pdknot.js) или KNOT=trefoil|figure8|cinquefoil|septafoil (пресет).
 // SP_PRE=<шагов> — физика до Stir (0 — прямо из базового лифта; по умолчанию 3000), SP_ONLY=1 — только упрощение и проверка
 // диаграммы (без серии после), UK_STIR — число Stir-попыток (по умолчанию 6), UK_BUD — бюджет шагов на попытку, SP_PNG=<png> — вид 2D
-// упрощённой диаграммы (нужен KNOT_CANVAS=canvas2d.js), SP_SEED — зерно, SP_SAVE=<json> — сохранить 3D-форму перед Stir, SP_START=<json> — начать с сохранённой формы (без физики до Stir), SP_KEEP=1 — не восстанавливать диаграмму при неудаче укладки. Критерий окружности — как в pdknot.js/unknot.js.
+// упрощённой диаграммы (нужен KNOT_CANVAS=canvas2d.js), SP_MODE=open|simplify|branch — техника Stir (сравнение), SP_TRIES — попыток в серии, SP_SEED — зерно, SP_SAVE=<json> — сохранить 3D-форму перед Stir, SP_START=<json> — начать с сохранённой формы (без физики до Stir), SP_KEEP=1 — не восстанавливать диаграмму при неудаче укладки. Критерий окружности — как в pdknot.js/unknot.js.
 (async ()=>{ const fs=__require('fs'), path=__require('path'), H=global.__H; window.__noAutoSave=true; window.__noWorkers=true; window.__noAutoThick=true;
   if(process.env.SP_KEEP==='1') window.__simpKeep=true;   // отладка: при неудаче укладки не восстанавливать прежнюю диаграмму (SP_PNG покажет сбойную)
   const out={};
@@ -53,17 +53,17 @@
   else if(PRE>0){ H.play(); let st=0; while(true){ const o=H.step(200); st+=200; if(!o.running || st>=PRE) break; } if(H.running()) H.play(); out.preSteps=st; }
   if(process.env.SP_SAVE){ fs.mkdirSync(path.dirname(process.env.SP_SAVE),{recursive:true}); fs.writeFileSync(process.env.SP_SAVE, JSON.stringify({name:out.name, N, verts:verts.map(v=>[+v.x.toFixed(5),+v.y.toFixed(5),+v.z.toFixed(5)])})); out.saved=process.env.SP_SAVE; }
   if(process.env.SP_SEED) _stirSeed=+process.env.SP_SEED;
-  window.__stirMode('simplify'); out.stirMode=STIR_MODE;
+  const MODE=process.env.SP_MODE||'simplify'; window.__stirMode(MODE); out.stirMode=STIR_MODE; H.set({ms:+(process.env.SP_TRIES||1)});   // SP_MODE=open|simplify|branch — сравнение техник; SP_TRIES — попыток в серии после Stir
   out.stirs=[]; let done=isCircle();
   for(let attempt=0; attempt<NSTIR && !done; attempt++){
     if(!window.__knotStir()){ out.stirs.push({at:attempt, started:false}); break; }
-    const d=_dbgStir||{}; const rec={at:attempt, ok:d.ok, why:d.why, n0:d.n0, n1:d.n1, src:d.src, n0src:d.n0src, r3:d.r3, ms:d.ms, nc:crossings.length, det:knotDet, running:H.running()};
+    const d=_dbgStir||{}; if(d.ok===undefined) d.ok=!d.tooTight; if(d.tooTight) d.why='too tight'; const rec={at:attempt, ok:d.ok, why:d.why, branch:d.branch? d.branch.M : undefined, n0:d.n0, n1:d.n1, src:d.src, n0src:d.n0src, r3:d.r3, ms:d.ms, nc:crossings.length, det:knotDet, running:H.running()};
     if(attempt===0 && process.env.SP_PNG) rec.png=png(process.env.SP_PNG);
     if(process.env.UK_VERBOSE==='1') console.error(JSON.stringify(rec));
     if(!d.ok){ out.stirs.push(rec); if(process.env.SP_ONLY==='1') break; if(H.running()) H.play(); continue; }   // как пользователь: неудача — нажать Stir ещё раз (другое зерно)
     if(process.env.SP_ONLY==='1'){ out.stirs.push(rec); break; }
-    let st=0, o=null; while(true){ o=H.step(200); st+=200; if(!o.running || st>=BUD) break; }
-    const r=roundness(); Object.assign(rec, {steps:st, settled:!o.running, rad:r.rad, flat:r.flat, cross:crossPlane(), det3d:_detRobust(3)}); out.stirs.push(rec);
+    let st=0, o=null; while(true){ o=H.step(200); st+=200; if(!o.running || st>=BUD*(+(process.env.SP_TRIES||1))) break; }
+    const r=roundness(); Object.assign(rec, {steps:st, E:_msBest? +(+_msBest.E).toPrecision(4) : null, settled:!o.running, rad:r.rad, flat:r.flat, cross:crossPlane(), det3d:_detRobust(3)}); out.stirs.push(rec);
     if(process.env.UK_VERBOSE==='1') console.error(JSON.stringify(rec));
     if(r.rad<0.08 && r.flat<0.05 && rec.cross===0){ done=true; break; }
     if(H.running()) H.play(); }
