@@ -6,7 +6,7 @@
   async function one(name, prep, sl){
     H.el('clear').onclick(); if(H.running()) H.play(); H.setSlider('thick',sl[0]); H.setSlider('repCoef',sl[1]); H.setSlider('bendCoef',sl[2]);
     await prep(); H.set({ms:3}); H.play(); const r1=runToEnd(60000); const E1=_msEnergies.map(e=>isFinite(e)?+e.toPrecision(4):'jam'); const det=knotDet;
-    const t0=Date.now(); const rr=window.__knotStir(); while(_stir) window.__knotStir();   // 6.0: у сфер после них ещё фаза контактов — ждать конца Stir const ms=Date.now()-t0; const dbg=_dbgStir; const holes0=_stirHoles.length;
+    const t0=Date.now(); const rr=window.__knotStir(); while(_stir) window.__knotStir(); const ms=Date.now()-t0; const dbg=_dbgStir; const holes0=_stirHoles.length;   // 6.0: у сфер после них ещё фаза контактов — ждать конца Stir
     const r2=rr.running? runToEnd(90000) : null;
     out[name]={det, E1, stirMs:ms, mode:dbg&&dbg.mode, remap:dbg&&dbg.remap, det01:[dbg&&dbg.det0, dbg&&dbg.det1], r2, E2:_msEnergies.map(e=>isFinite(e)?+e.toPrecision(4):'jam'), holes:[holes0,_stirHoles.length], status:H.dbg().status.slice(0,110)};
     console.error(name, JSON.stringify(out[name]).slice(0,500)); }
