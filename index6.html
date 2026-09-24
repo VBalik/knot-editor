@@ -2178,7 +2178,7 @@ function buildKnot3D(){
   // ложатся в вершины точно, проходы верны по построению; раскрытие контактов — задача
   // физики («надувание» толщины в startPhysics/relaxStep)
   if(window.__liftStages) window.__liftStages.pre=verts.map(v=>[v.x,v.y,v.z]);
-  _fromLift=true; _liftFromDiagram=true; _stirCount=0; _stirWaveVar=0; _sphNdiag=N; _uBase=0;   // 6.0: длина нити лифта — предел удлинения сферами   // свежий лифт из диаграммы: серия попыток, каждая — со своими случайными высотами
+  _fromLift=true; _liftFromDiagram=true; _stirCount=0; _stirWaveVar=0; _sphNdiag=N; _uBase=0; _sphR1=0;   // 6.0: длина нити лифта — предел удлинения сферами   // свежий лифт из диаграммы: серия попыток, каждая — со своими случайными высотами
   msWinsClear();               // окна результатов прежней диаграммы
   _msPaused=false; pillIdle(); stirCancel(); stirEnable(false); _stirWarn=''; _stirNote=''; _stirEv=[]; parCancel(true); _msCarry=null; _msOffset=0; // серия прошлого прогона закончена
   updateThickScale();          // толщина под сложность диаграммы
@@ -3683,11 +3683,11 @@ function _mvNext(){   // ход закончен (цель или лимит ш�
    и конечная энергия (чужие пряди вне ядра) — тип узла не меняется. Сферы — по очереди (K за Stir), каждая в новой самой
    окружённой точке вне прежних сфер. В конце нить передискретизируется в n'=round(T/L0) вершин с сертификатом (как «поправка
    F» режима петель), затем — разжатие контактов (как 4.20, коротко) и серия попыток с волнами 5.4. Нить остаётся длиннее
-   (без фазы 3): толщина в единицах длины нити та же, узел — «рыхлее»; лучшая прежняя попытка в новую серию не переносится
+   (без фазы 3): толщина и отталкивание считаются от длины нити до удлинения (_uBase), поэтому узел рыхлее; лучшая прежняя попытка в новую серию не переносится
    (другая длина — энергии несравнимы).
    ============================================================================ */
-const SPH_DEF={K:2, diam:0.5, grid:16, bins:3, stepsPer:500, stall:60, lag:0.75, dr:0.5, smooth:30, rep:0.5, split:1.4, lenCap:3.0, open:true};
-let _sph=null, _sphNdiag=0;
+const SPH_DEF={K:2, diam:0.5, grid:16, bins:3, stepsPer:500, stall:60, lag:0.75, dr:0.5, smooth:30, w0:0.1, rep:0.5, split:1.4, lenCap:3.0, lenStir:1.4, open:true};   // lenCap — предел длины нити от исходной (_uBase), lenStir — за один Stir
+let _sph=null, _sphNdiag=0, _sphR1=0;   // _sphR1 — наибольший радиус узла на первом Stir (до удлинения): от него размер сфер, чтобы он не рос вслед за удлинённой нитью
 function _sphCfg(){ return Object.assign({}, SPH_DEF, (typeof window!=='undefined' && window.__sph)||{}); }
 function _sphLen(){ let T=0; for(let i=0;i<N;i++) T+=verts[i].distanceTo(verts[(i+1)%N]); return T; }
 function _sphCenter(C, R, prev){   // самая «окружённая» точка сетки вне прежних сфер; null — нет
@@ -3711,17 +3711,19 @@ function _sphCenter(C, R, prev){   // самая «окружённая» точ
 function _sphNext(){   // начать следующую сферу; false — сфер больше нет
   const s=_sph, C=s.C; if(s.k>=C.K) return false;
   if(_sphLen()>=s.Tcap){ s.why='rope length cap'; return false; }
-  const R=C.diam*knotRadius(), cand=_sphCenter(C, R, s.list); if(!cand){ s.why='no free enclosed point'; return false; }
+  const kr=knotRadius(), R=C.diam*Math.min(kr, _sphR1>0? _sphR1 : kr), cand=_sphCenter(C, R, s.list); if(!cand){ s.why='no free enclosed point'; return false; }
   let cl=Infinity; for(let i=0;i<N;i++){ const a=verts[i], b=verts[(i+1)%N]; const d=_distSegP(cand.c, [a.x,a.y,a.z], [b.x,b.y,b.z]); if(d<cl) cl=d; }
   if(!isFinite(energyGrad(false).E)) _inflate=Math.min(_inflate, Math.max(1e-4, minSegGapRep()/(1.3*sNominal())));   // сфера стартует из допустимого состояния
   const a=0.5*sExcl(), r0=Math.max(0, cl-a);
-  s.cur={c:cand.c, R, r:r0, r0, a, stuck:new Uint8Array(N), U:new Float64Array(3*N), steps:0, stallc:0, rej:0, bins:cand.bins, cnt:cand.cnt, caught:0};
+  s.cur={c:cand.c, R, r:r0, r0, a, stuck:new Uint8Array(N), U:new Float64Array(3*N), steps:0, stallc:0, rej:0, kk:1, bins:cand.bins, cnt:cand.cnt, caught:0};
   s.list.push(s.cur); s.k++; return true;
 }
 function _sphBegin(){   // начало Stir «spheres» (из run() в stirStart)
   const C=_sphCfg(); _stirS0=null; _stirHoles=[]; _stirN0=0; _stir.mode='spheres'; profilesClear();   // профили прошлой серии — длины N; N будет меняться
   if(!(_uBase>0)) _uBase=N*L0;   // толщина — от длины нити до первого удлинения
-  _sph={C, k:0, list:[], N0:N, T0:_sphLen(), Tcap:C.lenCap*Math.max(_sphNdiag>0? _sphNdiag : N, 1)*L0, steps:0, acc:0, splits:0, log:[], why:''};
+  if(!(_sphR1>0)) _sphR1=knotRadius();
+  const T0=_sphLen();
+  _sph={C, k:0, list:[], N0:N, T0, Tcap:Math.min(C.lenCap*_uBase, C.lenStir*T0), steps:0, acc:0, splits:0, log:[], why:''};
   _stir.target=Infinity; _stir.n=Infinity;
   if(!_sphNext()) _sphDone(); else setStatus(stirStatus());
 }
@@ -3748,30 +3750,40 @@ function _sphStep(){   // один сертифицированный шаг р�
   const c=q.c, rho=q.r+q.a, st=q.stuck, U=q.U;
   const Dx=new Float64Array(n), Dy=new Float64Array(n), Dz=new Float64Array(n);
   for(let i=0;i<n;i++) if(st[i]){ const v=verts[i], d=Math.hypot(v.x-c[0], v.y-c[1], v.z-c[2]), need=rho-d; if(need>0){ Dx[i]=U[3*i]*need; Dy[i]=U[3*i+1]*need; Dz[i]=U[3*i+2]*need; } }
-  if(C.smooth>0){ const Sx=Float64Array.from(Dx), Sy=Float64Array.from(Dy), Sz=Float64Array.from(Dz); sobolevH1(C.smooth, Sx, Sy, Sz);   // свободные участки тянутся за прилипшими (сглаживание вдоль нити)
-    for(let i=0;i<n;i++) if(!st[i]){ Dx[i]=Sx[i]; Dy[i]=Sy[i]; Dz[i]=Sz[i]; } }
+  if(C.smooth>0){   // свободная нить тянется за прилипшей: сглаживание вдоль нити с нормировкой Шепарда (иначе соседям достаётся ~8 % сдвига и нить просто рвётся на длинные рёбра)
+    const Sx=Float64Array.from(Dx), Sy=Float64Array.from(Dy), Sz=Float64Array.from(Dz), W=new Float64Array(n), W1=new Float64Array(n), W2=new Float64Array(n);
+    for(let i=0;i<n;i++) W[i]=st[i]? 1 : 0; sobolevH1(C.smooth, Sx, Sy, Sz); sobolevH1(C.smooth, W, W1, W2);
+    for(let i=0;i<n;i++) if(!st[i]){ const w=Math.max(W[i], C.w0); Dx[i]=Sx[i]/w; Dy[i]=Sy[i]/w; Dz[i]=Sz[i]/w; } }
   let rm=0; for(let i=0;i<n;i++) rm=Math.max(rm, Math.hypot(_fx[i],_fy[i],_fz[i]));
   const wr=rm>1e-300 ? C.rep*capG/rm : 0; for(let i=0;i<n;i++){ Dx[i]+=wr*_fx[i]; Dy[i]+=wr*_fy[i]; Dz[i]+=wr*_fz[i]; }
-  for(let it=0; it<4 && close.length; it++){ let fixed=0;   // близкие чужие пары: сближающая составляющая снимается, поправка — свободным концам
-    for(let k=0;k<close.length;k+=8){ const i=close[k], j=close[k+1], si=close[k+2], tj=close[k+3], x=close[k+7]; if(!(x>1e-12)) continue;
-      const ip=(i+1)%n, jp=(j+1)%n, nx=close[k+4]/x, ny=close[k+5]/x, nz=close[k+6]/x;
-      const vrel=((1-si)*Dx[i]+si*Dx[ip]-(1-tj)*Dx[j]-tj*Dx[jp])*nx+((1-si)*Dy[i]+si*Dy[ip]-(1-tj)*Dy[j]-tj*Dy[jp])*ny+((1-si)*Dz[i]+si*Dz[ip]-(1-tj)*Dz[j]-tj*Dz[jp])*nz;
-      const vmin = x<S+0.05*L0 ? 0.5*capG : 0; if(vrel>=vmin) continue;
-      let wi=st[i]?0:(1-si), wip=st[ip]?0:si, wj=st[j]?0:(1-tj), wjp=st[jp]?0:tj; const sa=wi+wip, sb=wj+wjp; if(sa+sb<=1e-12) continue;
-      const qq=0.55*(vmin-vrel), qa=sb>1e-12? (sa>1e-12? qq : 0) : 2*qq, qb=sa>1e-12? (sb>1e-12? qq : 0) : 2*qq; fixed++;
-      if(sa>1e-12){ wi/=sa; wip/=sa; Dx[i]+=qa*nx*wi; Dy[i]+=qa*ny*wi; Dz[i]+=qa*nz*wi; Dx[ip]+=qa*nx*wip; Dy[ip]+=qa*ny*wip; Dz[ip]+=qa*nz*wip; }
-      if(sb>1e-12){ wj/=sb; wjp/=sb; Dx[j]-=qb*nx*wj; Dy[j]-=qb*ny*wj; Dz[j]-=qb*nz*wj; Dx[jp]-=qb*nx*wjp; Dy[jp]-=qb*ny*wjp; Dz[jp]-=qb*nz*wjp; } }
+  const radial=(i)=>{ const v=verts[i], d=Math.hypot(v.x-c[0], v.y-c[1], v.z-c[2]), ux=U[3*i], uy=U[3*i+1], uz=U[3*i+2];   // прилипшая: только по своему лучу и не внутрь сферы
+    const rad=Math.max(Dx[i]*ux+Dy[i]*uy+Dz[i]*uz, rho-d, 0); Dx[i]=ux*rad; Dy[i]=uy*rad; Dz[i]=uz*rad; };
+  for(let i=0;i<n;i++) if(st[i]) radial(i);   // до расталкивания пар: поправки считаются по настоящему движению прилипших
+  const pair=(k)=>{ const i=close[k], j=close[k+1], si=close[k+2], tj=close[k+3], x=close[k+7]; if(!(x>1e-12)) return null;
+    const ip=(i+1)%n, jp=(j+1)%n, nx=close[k+4]/x, ny=close[k+5]/x, nz=close[k+6]/x;   // n̂ — от j к i
+    const vrel=((1-si)*Dx[i]+si*Dx[ip]-(1-tj)*Dx[j]-tj*Dx[jp])*nx+((1-si)*Dy[i]+si*Dy[ip]-(1-tj)*Dy[j]-tj*Dy[jp])*ny+((1-si)*Dz[i]+si*Dz[ip]-(1-tj)*Dz[j]-tj*Dz[jp])*nz;
+    return {i, ip, j, jp, si, tj, x, nx, ny, nz, vrel}; };
+  for(let it=0; it<4 && close.length; it++){ let fixed=0;   // расталкивание: сближающая скорость близкой чужой пары снимается поправкой минимальной нормы свободным концам (прилипшие не трогаются)
+    for(let k=0;k<close.length;k+=8){ const p=pair(k); if(!p) continue; const vmin = p.x<S+0.05*L0 ? 0.5*capG : 0; if(p.vrel>=vmin) continue;
+      const wi=st[p.i]?0:(1-p.si), wip=st[p.ip]?0:p.si, wj=st[p.j]?0:(1-p.tj), wjp=st[p.jp]?0:p.tj, Wn=wi*wi+wip*wip+wj*wj+wjp*wjp; if(Wn<=1e-12) continue;
+      const lam=Math.min(1.1*(vmin-p.vrel)/Wn, 2.2*(vmin-p.vrel)); fixed++;
+      Dx[p.i]+=lam*p.nx*wi; Dy[p.i]+=lam*p.ny*wi; Dz[p.i]+=lam*p.nz*wi; Dx[p.ip]+=lam*p.nx*wip; Dy[p.ip]+=lam*p.ny*wip; Dz[p.ip]+=lam*p.nz*wip;
+      Dx[p.j]-=lam*p.nx*wj; Dy[p.j]-=lam*p.ny*wj; Dz[p.j]-=lam*p.nz*wj; Dx[p.jp]-=lam*p.nx*wjp; Dy[p.jp]-=lam*p.ny*wjp; Dz[p.jp]-=lam*p.nz*wjp; }
     if(!fixed) break; }
-  for(let i=0;i<n;i++) if(st[i]){ const v=verts[i], d=Math.hypot(v.x-c[0], v.y-c[1], v.z-c[2]), ux=U[3*i], uy=U[3*i+1], uz=U[3*i+2];   // прилипшая: только по своему лучу и не внутрь сферы
-    const rad=Math.max(Dx[i]*ux+Dy[i]*uy+Dz[i]*uz, rho-d, 0); Dx[i]=ux*rad; Dy[i]=uy*rad; Dz[i]=uz*rad; }
-  let kk=1, ok=false, mvT=0; const x0=verts.map(v=>v.clone());
+  for(let i=0;i<n;i++){ const d=Math.hypot(Dx[i],Dy[i],Dz[i]), lim=Math.min(limV[i], capG); if(d>lim && d>1e-300){ const f=lim/d; Dx[i]*=f; Dy[i]*=f; Dz[i]*=f; } }   // кап — один раз
+  for(let it=0; it<3 && close.length; it++){ let fixed=0;   // после капа — только уменьшение: у каждого конца сближающейся пары снимается его сближающая составляющая (прилипшая ждёт на луче)
+    for(let k=0;k<close.length;k+=8){ const p=pair(k); if(!p || p.vrel>=0) continue; fixed++;
+      for(const [v, sg] of [[p.i,1],[p.ip,1],[p.j,-1],[p.jp,-1]]){ const cn=sg*(Dx[v]*p.nx+Dy[v]*p.ny+Dz[v]*p.nz); if(cn>=0) continue;
+        if(st[v]){ Dx[v]=0; Dy[v]=0; Dz[v]=0; } else { Dx[v]-=sg*cn*p.nx; Dy[v]-=sg*cn*p.ny; Dz[v]-=sg*cn*p.nz; } } }
+    if(!fixed) break; }
+  let kk=q.kk||1, ok=false, mvT=0; const x0=verts.map(v=>v.clone());
   for(let tr=0; tr<3 && !ok; tr++){
-    for(let i=0;i<n;i++){ let dx=kk*Dx[i], dy=kk*Dy[i], dz=kk*Dz[i]; const d=Math.hypot(dx,dy,dz), lim=kk*Math.min(limV[i], capG);
-      if(d>lim && d>1e-300){ const f=lim/d; dx*=f; dy*=f; dz*=f; } verts[i].x=x0[i].x+dx; verts[i].y=x0[i].y+dy; verts[i].z=x0[i].z+dz; }
+    for(let i=0;i<n;i++){ verts[i].x=x0[i].x+kk*Dx[i]; verts[i].y=x0[i].y+kk*Dy[i]; verts[i].z=x0[i].z+kk*Dz[i]; }
     const e1=energyGrad(false); mvT=0; let okLocal=true;
     for(let i=0;i<n;i++){ const d=verts[i].distanceTo(x0[i]); if(d>mvT) mvT=d; if(!(d<0.5*gapV[i])) okLocal=false; }
     ok=isFinite(e1.E) && okLocal;
     if(!ok){ for(let i=0;i<n;i++) verts[i].copy(x0[i]); kk*=0.35; if(!isFinite(e1.E)) _stir.rejInf++; else _stir.rejLoc++; } }
+  q.kk = ok? Math.min(1, 1.5*kk) : kk;   // отказ не меняет состояния — следующий шаг должен быть меньше, а не тем же
   q.steps++; s.steps++; _stir.i++;
   let grew=false;
   if(ok){ s.acc++; _stir.moved+=mvT;
@@ -3784,6 +3796,7 @@ function _sphStep(){   // один сертифицированный шаг р�
   q.stallc = grew? 0 : q.stallc+1;
   let end='';
   if(q.r>=q.R-1e-12){ let lag=0; for(let i=0;i<N;i++) if(q.stuck[i]){ const v=verts[i]; lag=Math.max(lag, q.r+q.a-Math.hypot(v.x-q.c[0], v.y-q.c[1], v.z-q.c[2])); } if(lag<C.lag*L0) end='grown'; }
+  if(!end && q.kk<1e-3) end='jammed';   // шаг схлопнулся: вокруг этой сферы узел слишком плотный
   if(!end && q.steps>=12 && q.rej>0.8*q.steps) end='jammed';   // шаги почти все отвергаются — не тратить время (узел слишком плотный вокруг этой сферы)
   if(!end && q.stallc>=C.stall) end='stalled';
   if(!end && q.steps>=C.stepsPer) end='step budget';
@@ -3807,17 +3820,20 @@ function _sphResample(){   // равномерная нить n'=round(T/L0) п�
 }
 function _sphDone(){   // сферы закончены: передискретизация, затем разжатие контактов (или сразу серия); возвращает то же, что stirStep
   const s=_sph; s.cur=null; s.resampled=_sphResample(); recenter(); s.N1=N; s.rope=+(_sphLen()/s.T0).toFixed(3);
-  { const g=energyGrad(false); if(!isFinite(g.E)){ const gr=minSegGapRep(); _inflate=Math.max(1e-4, Math.min(1, gr/(1.3*sNominal()))); } }   // ядро по зазорам (нить длиннее — ядро S∝N·L0 толще)
-  if(s.C.open){ _stir.mode='open'; _stir.R0=knotRadius(); _stirX0=verts.map(v=>v.clone()); _stir.disp=0; _stir.i=0; _stir.n=STIR_STEPS; _stir.target=STIR_AMP*Math.max(_stir.R0, 2*L0);
+  const changed=(s.N1!==s.N0 || Math.abs(s.rope-1)>0.01);
+  if(changed){ _msCarry=null; _msEnergies=[]; msWinsClear(); }   // нить удлинилась — прежняя лучшая попытка (другая длина) в серию не идёт; иначе остаётся №1, как в режиме contacts
+  { const g=energyGrad(false); if(!isFinite(g.E)){ const gr=minSegGapRep(); _inflate=Math.max(1e-4, Math.min(1, gr/(1.3*sNominal()))); } }   // после передискретизации пряди могли сблизиться; S от _uBase не меняется
+  if(s.C.open && (s.resampled || !changed)){ _stir.mode='open'; _stir.R0=knotRadius(); _stirX0=verts.map(v=>v.clone()); _stir.disp=0; _stir.i=0; _stir.n=STIR_STEPS; _stir.target=STIR_AMP*Math.max(_stir.R0, 2*L0);
     _stir.stall=0; _stir.rr=undefined; _stir._rj0=_stir.rejected; _stir.s=sNominal(); stirFieldContacts(); setStatus(stirStatus()); return true; }
   stirFinish(); return false;
 }
-function _sphNote(){ const s=_sph; if(!s) return ''; return ' · '+s.log.length+(s.log.length===1?' sphere':' spheres')+' inflated (rope ×'+(s.rope||1).toFixed(2)+(s.why? '; '+s.why : '')+')'; }
+function _sphNote(){ const s=_sph; if(!s) return ''; const L=s.log.map(e=>e.end+' '+Math.round(100*e.r/Math.max(1e-12,e.R))+'%').join(', ');
+  return ' · '+s.log.length+(s.log.length===1?' sphere':' spheres')+(L? ' ('+L+')' : '')+' · rope ×'+(s.rope||1).toFixed(2)+(s.resampled===false? '; resample failed' : '')+(s.why? '; '+s.why : ''); }
 function stirStart(){
   if(running || _stir || !verts.length) return false;
   { const g=energyGrad(false);                       // ядро шире зазоров (ползунки сдвинуты после финала) — сдуть, стадия A раскроет заново
     if(!isFinite(g.E)){ const gr=minSegGapRep(); _inflate=Math.max(1e-4, Math.min(1, gr/(1.3*sNominal()))); if(!isFinite(energyGrad(false).E)){ showError('cannot stir: strands are inside the hard core'); return false; } } }
-  let kept=msWinsKeepBest(); _msSel=null; msSetShown(null); if(STIR_MODE==='spheres'){ kept=null; msWinsClear(); }   // 6.0: окно прежней лучшей попытки убирается и на последовательном пути; после сфер нить длиннее — прежняя лучшая попытка (другая длина) в серию не переносится   // 2.40: Stir идёт от узла в главном виде (выбранного кликом или лучшего); выбор снят, окно — только лучшее
+  let kept=msWinsKeepBest(); _msSel=null; msSetShown(null);   // 6.0: для spheres решение о переносе — в _sphDone (прежняя лучшая попытка теряется, только если нить удлинилась)
   _msCarry = kept ? {E:kept.E, verts:kept.verts.map(v=>v.clone()), note:kept.note||'', key:(kept.key!==undefined? kept.key : constsKey()), thick:thickOf(kept)} : null;   // лучшая попытка идёт в новую серию как №1
   _msEnergies = kept ? [kept.E] : []; _msBest=null; _msRound=0; _msK=1; _msPaused=false;
   const R0=knotRadius();
