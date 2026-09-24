@@ -2,7 +2,7 @@
 // Узел: HK_FILE=out/hard/<name>.json (укладка PD, как в pdknot.js) или KNOT=trefoil|figure8|cinquefoil|septafoil (пресет).
 // SP_PRE=<шагов> — физика до Stir (0 — прямо из базового лифта; по умолчанию 3000), SP_ONLY=1 — только упрощение и проверка
 // диаграммы (без серии после), UK_STIR — число Stir-попыток (по умолчанию 6), UK_BUD — бюджет шагов на попытку, SP_PNG=<png> — вид 2D
-// упрощённой диаграммы (нужен KNOT_CANVAS=canvas2d.js), SP_MODE=open|moves|spheres — техника Stir (сравнение), SP_SPH='{json}' — параметры сфер (6.0), SP_PROJ=<префикс> — проекции 3D-формы до и после каждого Stir (PNG), SP_TRIES — попыток в серии, SP_SEED — зерно, SP_SAVE=<json> — сохранить 3D-форму перед Stir, SP_START=<json> — начать с сохранённой формы (без физики до Stir), SP_KEEP=1 — не восстанавливать диаграмму при неудаче укладки. Критерий окружности — как в pdknot.js/unknot.js.
+// упрощённой диаграммы (нужен KNOT_CANVAS=canvas2d.js), SP_MODE=open|moves|spheres — техника Stir (сравнение), SP_SPH='{json}' — параметры сфер (6.0), SP_PROJ=<префикс> — проекции 3D-формы до и после каждого Stir (PNG); в каждой записи stirs[] поле simp — наименьшее число пересечений проекции 3D-формы после упрощения ходами Рейдемейстера (8 направлений): мера сложности, не зависящая от длины нити, SP_TRIES — попыток в серии, SP_SEED — зерно, SP_SAVE=<json> — сохранить 3D-форму перед Stir, SP_START=<json> — начать с сохранённой формы (без физики до Stir), SP_KEEP=1 — не восстанавливать диаграмму при неудаче укладки. Критерий окружности — как в pdknot.js/unknot.js.
 (async ()=>{ const fs=__require('fs'), path=__require('path'), H=global.__H; window.__noAutoSave=true; window.__noWorkers=true; window.__noAutoThick=true;
   if(process.env.SP_KEEP==='1') window.__simpKeep=true;   // отладка: при неудаче укладки не восстанавливать прежнюю диаграмму (SP_PNG покажет сбойную)
   const out={};
@@ -67,6 +67,10 @@
     if(!d.ok){ out.stirs.push(rec); if(process.env.SP_ONLY==='1') break; if(H.running()) H.play(); continue; }   // как пользователь: неудача — нажать Stir ещё раз (другое зерно)
     if(process.env.SP_ONLY==='1'){ out.stirs.push(rec); break; }
     let st=0, o=null; while(true){ o=H.step(200); st+=200; if(!o.running || st>=BUD*(+(process.env.SP_TRIES||1))) break; }
+    const simpNC=()=>{ if(typeof RMoves==='undefined' || typeof _mvProject!=='function') return null; let best=Infinity, sd=11; const rnd=()=>{ sd=(Math.imul(sd,1103515245)+12345)&0x7fffffff; return sd/0x80000000; };   // сложность формы: проекция (8 направлений) → PD → упрощение ходами Рейдемейстера → наименьшее число пересечений
+      for(let t=0;t<8;t++){ let d=[rnd()-0.5,rnd()-0.5,rnd()-0.5]; const l=Math.hypot(d[0],d[1],d[2])||1; d=[d[0]/l,d[1]/l,d[2]/l]; const P=_mvProject(verts, _mvBasis(d)); if(!P) continue; let L; try{ L=new RMoves.Link(P.pd); if(!L.valid()) continue; }catch(e){ continue; }
+        const r=L.clone().simplify({r3Budget:300, rnd}); best=Math.min(best, r.best.size()); } return isFinite(best)? best : null; };
+    rec.simp=simpNC();
     const r=roundness(); Object.assign(rec, {steps:st, E:_msBest? +(+_msBest.E).toPrecision(4) : null, settled:!o.running, rad:r.rad, flat:r.flat, cross:crossPlane(), det3d:_detRobust(3)}); out.stirs.push(rec);
     if(process.env.UK_VERBOSE==='1') console.error(JSON.stringify(rec));
     if(r.rad<0.08 && r.flat<0.05 && rec.cross===0){ done=true; break; }
