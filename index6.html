@@ -2178,7 +2178,7 @@ function buildKnot3D(){
   // ложатся в вершины точно, проходы верны по построению; раскрытие контактов — задача
   // физики («надувание» толщины в startPhysics/relaxStep)
   if(window.__liftStages) window.__liftStages.pre=verts.map(v=>[v.x,v.y,v.z]);
-  _fromLift=true; _liftFromDiagram=true; _stirCount=0; _stirWaveVar=0; _sphNdiag=N;   // 6.0: длина нити лифта — предел удлинения сферами   // свежий лифт из диаграммы: серия попыток, каждая — со своими случайными высотами
+  _fromLift=true; _liftFromDiagram=true; _stirCount=0; _stirWaveVar=0; _sphNdiag=N; _uBase=0;   // 6.0: длина нити лифта — предел удлинения сферами   // свежий лифт из диаграммы: серия попыток, каждая — со своими случайными высотами
   msWinsClear();               // окна результатов прежней диаграммы
   _msPaused=false; pillIdle(); stirCancel(); stirEnable(false); _stirWarn=''; _stirNote=''; _stirEv=[]; parCancel(true); _msCarry=null; _msOffset=0; // серия прошлого прогона закончена
   updateThickScale();          // толщина под сложность диаграммы
@@ -2369,7 +2369,9 @@ let _thickScale=1;            // (устарело: толщина теперь 
 // ЕДИНИЦЫ ШКАЛ (2026-09-03): единица u = L/3000 (L — длина нити). Диаметр трубки
 // D = w·u, расстояние жёсткого ядра s = (w+REP_GAIN·r)·u (2.21: REP_GAIN=5): отталкивание бесконечно при
 // сближении осей прядей до s и гаснет как 1/(x−s)⁴ дальше.
-function unitLen(){ return (N*L0)/UNIT_DIV; }
+let _uBase=0;   // 6.0: длина нити, от которой считаются толщина и отталкивание (0 — текущая N·L0). Сферы удлиняют нить, а толщина остаётся как у исходной верёвки — нить становится рыхлее, а не просто крупнее
+function ropeN(){ return _uBase>0? _uBase/L0 : N; }   // «число вершин исходной нити» при нынешней L0
+function unitLen(){ return (_uBase>0? _uBase : N*L0)/UNIT_DIV; }
 function updateThickScale(){ updateGeomUnits(); }
 function updateGeomUnits(){ if(N>0 && L0>0) tubeRadius=0.5*thickDNominal(); }
 const REP_GAIN=1, REP_FORCE=5;               // 2.35: ядро (w+REP_GAIN·r)·u = (w+r)·u; сила хвоста ×REP_FORCE (просьба «отталкивание в 5 раз сильнее»)
@@ -2411,7 +2413,7 @@ function kBend(){ return KB_PER*Math.max(0.2, bendCoef); }      // жёстко�
 // хранят сертификаты, а не силы. Как только ядро номинальное, действует
 // настоящий kR, и равновесие ищется по истинному закону.
 const INFL_BOOST=50;
-function kRep(){ return REP_FORCE*KR_BETA*KB_PER*9/(N*N*N)*((_inflate<1 || _stir)? INFL_BOOST : 1); }
+function kRep(){ const Nr=ropeN(); return REP_FORCE*KR_BETA*KB_PER*9/(Nr*Nr*Nr)*((_inflate<1 || _stir)? INFL_BOOST : 1); }
 
 // ---- состояние спуска и диагностика (читается телеметрией/люками) ----
 let stepCounter=0, _nextSnap=25, _frameNo=0, recordEvery=1;
@@ -3717,6 +3719,7 @@ function _sphNext(){   // начать следующую сферу; false — 
 }
 function _sphBegin(){   // начало Stir «spheres» (из run() в stirStart)
   const C=_sphCfg(); _stirS0=null; _stirHoles=[]; _stirN0=0; _stir.mode='spheres'; profilesClear();   // профили прошлой серии — длины N; N будет меняться
+  if(!(_uBase>0)) _uBase=N*L0;   // толщина — от длины нити до первого удлинения
   _sph={C, k:0, list:[], N0:N, T0:_sphLen(), Tcap:C.lenCap*Math.max(_sphNdiag>0? _sphNdiag : N, 1)*L0, steps:0, acc:0, splits:0, log:[], why:''};
   _stir.target=Infinity; _stir.n=Infinity;
   if(!_sphNext()) _sphDone(); else setStatus(stirStatus());
@@ -3779,6 +3782,7 @@ function _sphStep(){   // один сертифицированный шаг р�
   q.stallc = grew? 0 : q.stallc+1;
   let end='';
   if(q.r>=q.R-1e-12){ let lag=0; for(let i=0;i<N;i++) if(q.stuck[i]){ const v=verts[i]; lag=Math.max(lag, q.r+q.a-Math.hypot(v.x-q.c[0], v.y-q.c[1], v.z-q.c[2])); } if(lag<C.lag*L0) end='grown'; }
+  if(!end && q.steps>=12 && q.rej>0.8*q.steps) end='jammed';   // шаги почти все отвергаются — не тратить время (узел слишком плотный вокруг этой сферы)
   if(!end && q.stallc>=C.stall) end='stalled';
   if(!end && q.steps>=C.stepsPer) end='step budget';
   if(!end && _sphLen()>=s.Tcap) end='rope length cap';
@@ -5196,7 +5200,7 @@ function _workerSource(){
     self.postMessage({type:'alive', k:m.k});   // 2.38: сторож 8 с ждёт первого сообщения — подготовка (лифт, выворачивание, первые 12 шагов на большом N) на занятой машине может идти дольше
     try{
       self.__noWasm=!!m.noWasm; await _waInit();   // 3.2: флаг стенда «без Wasm» — из сообщения; модуль ядра пар — до старта физики (несколько мс; при отказе — JS-путь)
-      thickCoef=m.thick; repCoef=m.rep; bendCoef=m.bend; MULTI_START=1; _stirN0=m.n0||0; _annWavesOn=!!m.waves; _annNC=m.nc||0; _stirWaveVar=m.wvar||0;   // N0 серии после Stir (фаза 3 возвращает к нему; 0 — обычная серия)
+      thickCoef=m.thick; repCoef=m.rep; bendCoef=m.bend; MULTI_START=1; _stirN0=m.n0||0; _annWavesOn=!!m.waves; _annNC=m.nc||0; _stirWaveVar=m.wvar||0; _uBase=m.ub||0;   // N0 серии после Stir (фаза 3 возвращает к нему; 0 — обычная серия)
       if(m.resume){   // 2.30: досчёт закончившейся попытки с новыми константами — от её формы, без фазы A и без нового лифта
         _setVertsFrom(_vertsFromFlat(m.lift)); recenter(); _liftFromDiagram=false; _fromLift=false;
         knotDet=m.knotDet; isUnknot=!!m.isUnknot;
@@ -5282,7 +5286,7 @@ function parLaunch(){
     w.onerror=(ev)=>{ if(ev && ev.preventDefault) ev.preventDefault(); if(_par && _par.active.get(k)===ent) parWorkerFailed(k, (ev && ev.message) || 'worker error'); };   // preventDefault: без «Script error.» в баннере страницы
     _par.active.set(k, ent);
     const P=_par; setTimeout(()=>{ if(_par===P && P.active.get(k)===ent && !ent.alive) parWorkerFailed(k, 'no response in 8 s'); }, 8000);   // 8 с: на занятой машине воркер стартует дольше
-    const base={type:'run', k, thick:thickCoef, rep:repCoef, bend:bendCoef, every:12, budget:80000, knotDet, isUnknot, n0:_stirN0, waves:_annWavesOn, wvar:_stirWaveVar, nc:_annNC, noWasm:!!window.__noWasm};   // noWasm — флаг стенда (воркер читает его из сообщения)   // n0 — N0 серии после Stir (фаза 3 в воркере; 0 — нет)
+    const base={type:'run', k, thick:thickCoef, rep:repCoef, bend:bendCoef, every:12, budget:80000, knotDet, isUnknot, n0:_stirN0, waves:_annWavesOn, wvar:_stirWaveVar, nc:_annNC, ub:_uBase, noWasm:!!window.__noWasm};   // noWasm — флаг стенда (воркер читает его из сообщения)   // n0 — N0 серии после Stir (фаза 3 в воркере; 0 — нет)
     const s0=(_par.s0 && k>0)? Object.assign({k}, _par.s0) : null;
     w.postMessage(Object.assign(base, {stretch:(_par.kind==='lift' && k>0 && !s0)}, _par.payload, s0? {s0} : {}));
   }
