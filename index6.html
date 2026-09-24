@@ -317,7 +317,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
       <span class="chip" title="Tight packing: the knot shrinks to near contact (held only by contact repulsion). A separate mode — NOT stiffness"><label style="cursor:pointer">Tight <input type="checkbox" id="tightChk"></label></span>
       <span class="chip" title="Self-repulsion, 1–10 (×2 since 4.13: each step = 2 units, r = 2×slider): strands cannot come closer than (w+r) units between axes; beyond that a 1/Δ⁴ repulsion (×5 since 2.35)">Repel. <input type="range" id="repCoef" min="1" max="10" step="1" value="5"><b id="repVal">5</b></span>
       <span class="chip" title="Number of tries (minimization attempts), 1–20: each try starts from the diagram with its own random heights of the knot parts; applies to the next run">Tries <input id="msN" type="number" min="1" max="20" value="5"></span>
-      <button id="play" class="go" title="Physics: run the tries · Pause · Stir: push the tightest strand pairs apart (topology-safe) and rerun the tries with narrow running waves ×500 — Stir 1: stiffness waves, Stir 2: self-repulsion waves, Stir 3: both, then again 1, 2, 3">▶ Physics</button>
+      <button id="play" class="go" title="Physics: run the tries · Pause · Stir: inflate invisible spheres from the points most enclosed by strands (strands stick to a sphere and move outward with it, the rope may lengthen; topology-safe), then rerun the tries with narrow running waves ×500 — Stir 1: stiffness waves, Stir 2: self-repulsion waves, Stir 3: both, then again 1, 2, 3">▶ Physics</button>
       <button id="exportObj" class="ghost" title="Export the 3D model as OBJ">OBJ</button>
       <button id="exportTelem" class="ghost" title="Download relaxation telemetry for diagnostics">Telem</button>
       <span class="tspacer"></span>
@@ -2178,7 +2178,7 @@ function buildKnot3D(){
   // ложатся в вершины точно, проходы верны по построению; раскрытие контактов — задача
   // физики («надувание» толщины в startPhysics/relaxStep)
   if(window.__liftStages) window.__liftStages.pre=verts.map(v=>[v.x,v.y,v.z]);
-  _fromLift=true; _liftFromDiagram=true; _stirCount=0; _stirWaveVar=0;   // свежий лифт из диаграммы: серия попыток, каждая — со своими случайными высотами
+  _fromLift=true; _liftFromDiagram=true; _stirCount=0; _stirWaveVar=0; _sphNdiag=N;   // 6.0: длина нити лифта — предел удлинения сферами   // свежий лифт из диаграммы: серия попыток, каждая — со своими случайными высотами
   msWinsClear();               // окна результатов прежней диаграммы
   _msPaused=false; pillIdle(); stirCancel(); stirEnable(false); _stirWarn=''; _stirNote=''; _stirEv=[]; parCancel(true); _msCarry=null; _msOffset=0; // серия прошлого прогона закончена
   updateThickScale();          // толщина под сложность диаграммы
@@ -3025,7 +3025,7 @@ function msRestoreBest(){   // вернуть лучшую попытку; её 
    другой центр/плоскость (STIR_REMAP_TRIES), затем запасной вариант — растаскивание 2.21. Каждая
    новая попытка серии после Stir (и каждый воркер) получает СВОЁ выворачивание исходной формы S0
    (другая «дыра»/плоскость) — максимальное разнообразие стартов. ---- */
-const STIR_SUB=8, STIR_REMAP_TRIES=6; let STIR_MODE='open';   // 5.3: Stir = разжатие контактов (как 4.20): ходы Рейдемейстера в 3D (moves) Хакена не распутали — только стенд (window.__stirMode('moves')); подмена диаграммы (5.0–5.2) убрана: окно 2D — пользователя (победитель сравнения на Хакене: 3/3 окружностей за ~20 с против 1/3 у contacts и 0/3 у branch); contacts/loops/invert остались только для стенда (window.__stirMode)   // основная программа: Stir = разжатие тугих контактов (петли/выворачивание остаются в коде)
+const STIR_SUB=8, STIR_REMAP_TRIES=6; let STIR_MODE='spheres';   // 6.0: Stir = раздувание сфер → разжатие контактов → серия с волнами   // 5.3: Stir = разжатие контактов (как 4.20): ходы Рейдемейстера в 3D (moves) Хакена не распутали — только стенд (window.__stirMode('moves')); подмена диаграммы (5.0–5.2) убрана: окно 2D — пользователя (победитель сравнения на Хакене: 3/3 окружностей за ~20 с против 1/3 у contacts и 0/3 у branch); contacts/loops/invert остались только для стенда (window.__stirMode)   // основная программа: Stir = разжатие тугих контактов (петли/выворачивание остаются в коде)
 const STIR_ARC=0.125, STIR_HR=[1.5,6], STIR_HMIN=0.25, STIR_SEP=45, STIR_K=[2,4], STIR_LEN=2.0, STIR_SKIP=0.3;   // 2026-09-14 по просьбе: петли вдвое уже (дуга 0.125·Rk) и больше (2–4), бюджет длины до n′≤3n
 // STIR_ARC — длина дуги (доля Rk); STIR_HR — высота петли H_t=U(1.5,6)·ρ_i, ρ_i=|X[i]−O| — исходное расстояние точки от центра (поправка E, 2026-09-13; H<0.8·1.5·ρ_i — отказ low);
 // STIR_HMIN — мин. высота бортов (доля Rk); STIR_SEP — мин. угол между направлениями петель (град); STIR_K — петель за ремап; STIR_LEN — кап добавки длины (доля N·L0):
@@ -3346,7 +3346,7 @@ function stirRemapLift(seed){   // выворачивание S0 в отдель
   if(r){ f=new Float32Array(N*3); for(let i=0;i<N;i++){ f[3*i]=verts[i].x; f[3*i+1]=verts[i].y; f[3*i+2]=verts[i].z; } }
   _stirSetVerts(keep, L0k); return f;   // N мог измениться (поправка F)
 }
-function stirCancel(){ _stirS0=null; _stirHoles=[]; _stirN0=0; _stirPins=null; _pinsFresh=false; _pinPos=null; _pinMob=null; _stirPending=null; physChgCancel(); if(!_stir) return; _stir=null; _stirX0=null; const p=document.getElementById('play'); if(p){ p.disabled=false; p.textContent='▶ Physics'; p.classList.remove('stir'); } _playStir=false; }
+function stirCancel(){ _sph=null; _stirS0=null; _stirHoles=[]; _stirN0=0; _stirPins=null; _pinsFresh=false; _pinPos=null; _pinMob=null; _stirPending=null; physChgCancel(); if(!_stir) return; _stir=null; _stirX0=null; const p=document.getElementById('play'); if(p){ p.disabled=false; p.textContent='▶ Physics'; p.classList.remove('stir'); } _playStir=false; }
 let _playStir=false;        // единая кнопка: после финала серии «▶ Physics» становится «Stir»
 function stirEnable(on){ const b=document.getElementById('play'); if(!b) return; _playStir=!!on;
   if(on){ b.textContent='▶ Stir '+(_stirWaveFix>0? _stirWaveFix : (_stirCount%3)+1); b.classList.add('stir'); b.classList.remove('running'); b.disabled=false; }
@@ -3667,11 +3667,151 @@ function _mvNext(){   // ход закончен (цель или лимит ш�
   if(!_mvSetup(true)) return false;
   setStatus(stirStatus()); return true;
 }
+/* ============================================================================
+   6.0: STIR «SPHERES» — РАЗДУВАНИЕ СФЕР ИЗНУТРИ УЗЛА (идея пользователя)
+   Внутри 3D-узла ищется точка, окружённая наибольшим числом нитей: по сетке в габарите узла для каждой свободной точки
+   считается, сколько направлений (кубическая карта 6·m² ячеек) заняты вершинами ближе радиуса будущей сферы; точка у края
+   узла видит пустую половину неба и проигрывает. Из неё растёт невидимая сфера до диаметра ≈ половины узла (SPH_DEF.diam
+   от наибольшего радиуса узла). Вершина, коснувшаяся сферы, ПРИЛИПАЕТ: её направление от центра запоминается и дальше она
+   движется только по своему лучу (без скольжения по сфере); сфера непроницаема — всё, что оказалось внутри, выходит на
+   поверхность по своему лучу. Свободные участки нити тянутся следом (поле сглажено вдоль нити), чужие пряди расталкиваются
+   (отталкивание + снятие сближающей составляющей в близких парах, поправка — только свободной стороне). Нить при этом
+   удлиняется: рёбра длиннее split·L0 делятся пополам вставкой вершин (геометрия не меняется), абсолютное ядро сохраняется
+   через _inflate. Каждый шаг под тем же сертификатом, что stirStep: сдвиг каждой вершины < 0.5 её зазора до чужих отрезков
+   и конечная энергия (чужие пряди вне ядра) — тип узла не меняется. Сферы — по очереди (K за Stir), каждая в новой самой
+   окружённой точке вне прежних сфер. В конце нить передискретизируется в n'=round(T/L0) вершин с сертификатом (как «поправка
+   F» режима петель), затем — разжатие контактов (как 4.20, коротко) и серия попыток с волнами 5.4. Нить остаётся длиннее
+   (без фазы 3): толщина в единицах длины нити та же, узел — «рыхлее»; лучшая прежняя попытка в новую серию не переносится
+   (другая длина — энергии несравнимы).
+   ============================================================================ */
+const SPH_DEF={K:2, diam:0.5, grid:16, bins:3, stepsPer:500, stall:60, lag:0.75, dr:0.5, smooth:30, rep:0.5, split:1.4, lenCap:3.0, open:true};
+let _sph=null, _sphNdiag=0;
+function _sphCfg(){ return Object.assign({}, SPH_DEF, (typeof window!=='undefined' && window.__sph)||{}); }
+function _sphLen(){ let T=0; for(let i=0;i<N;i++) T+=verts[i].distanceTo(verts[(i+1)%N]); return T; }
+function _sphCenter(C, R, prev){   // самая «окружённая» точка сетки вне прежних сфер; null — нет
+  const n=N, g=C.grid, m=C.bins, S=sExcl(), R2=R*R, cl=S+0.5*L0, cl2=cl*cl;
+  const lo=[Infinity,Infinity,Infinity], hi=[-Infinity,-Infinity,-Infinity];
+  const X=new Float64Array(n), Y=new Float64Array(n), Z=new Float64Array(n);
+  for(let i=0;i<n;i++){ const v=verts[i]; X[i]=v.x; Y[i]=v.y; Z[i]=v.z; if(v.x<lo[0]) lo[0]=v.x; if(v.x>hi[0]) hi[0]=v.x; if(v.y<lo[1]) lo[1]=v.y; if(v.y>hi[1]) hi[1]=v.y; if(v.z<lo[2]) lo[2]=v.z; if(v.z>hi[2]) hi[2]=v.z; }
+  const occ=new Uint8Array(6*m*m); let best=null;
+  for(let ix=0; ix<g; ix++) for(let iy=0; iy<g; iy++) for(let iz=0; iz<g; iz++){
+    const px=lo[0]+(ix+0.5)/g*(hi[0]-lo[0]), py=lo[1]+(iy+0.5)/g*(hi[1]-lo[1]), pz=lo[2]+(iz+0.5)/g*(hi[2]-lo[2]);
+    let inside=false; for(const s of prev){ if(Math.hypot(px-s.c[0], py-s.c[1], pz-s.c[2])<s.r+s.a){ inside=true; break; } } if(inside) continue;
+    occ.fill(0); let bins=0, cnt=0, bad=false;
+    for(let k=0;k<n;k++){ const dx=X[k]-px, dy=Y[k]-py, dz=Z[k]-pz, d2=dx*dx+dy*dy+dz*dz; if(d2<cl2){ bad=true; break; } if(d2>R2) continue; cnt++;
+      const ax=Math.abs(dx), ay=Math.abs(dy), az=Math.abs(dz); let f, u, w;
+      if(ax>=ay && ax>=az){ f=dx>0?0:1; u=dy/ax; w=dz/ax; } else if(ay>=az){ f=dy>0?2:3; u=dx/ay; w=dz/ay; } else { f=dz>0?4:5; u=dx/az; w=dy/az; }
+      const iu=Math.min(m-1, Math.floor((u+1)*0.5*m)), iw=Math.min(m-1, Math.floor((w+1)*0.5*m)), b=(f*m+iu)*m+iw; if(!occ[b]){ occ[b]=1; bins++; } }
+    if(bad || !bins) continue;
+    const score=bins+cnt/(n+1); if(!best || score>best.score) best={c:[px,py,pz], score, bins, cnt}; }
+  return best;
+}
+function _sphNext(){   // начать следующую сферу; false — сфер больше нет
+  const s=_sph, C=s.C; if(s.k>=C.K) return false;
+  if(_sphLen()>=s.Tcap){ s.why='rope length cap'; return false; }
+  const R=C.diam*knotRadius(), cand=_sphCenter(C, R, s.list); if(!cand){ s.why='no free enclosed point'; return false; }
+  let cl=Infinity; for(let i=0;i<N;i++){ const a=verts[i], b=verts[(i+1)%N]; const d=_distSegP(cand.c, [a.x,a.y,a.z], [b.x,b.y,b.z]); if(d<cl) cl=d; }
+  const a=0.5*sExcl(), r0=Math.max(0, cl-a);
+  s.cur={c:cand.c, R, r:r0, r0, a, stuck:new Uint8Array(N), U:new Float64Array(3*N), steps:0, stallc:0, rej:0, bins:cand.bins, cnt:cand.cnt, caught:0};
+  s.list.push(s.cur); s.k++; return true;
+}
+function _sphBegin(){   // начало Stir «spheres» (из run() в stirStart)
+  const C=_sphCfg(); _stirS0=null; _stirHoles=[]; _stirN0=0; _stir.mode='spheres'; profilesClear();   // профили прошлой серии — длины N; N будет меняться
+  _sph={C, k:0, list:[], N0:N, T0:_sphLen(), Tcap:C.lenCap*Math.max(_sphNdiag>0? _sphNdiag : N, 1)*L0, steps:0, acc:0, splits:0, log:[], why:''};
+  _stir.target=Infinity; _stir.n=Infinity;
+  if(!_sphNext()) _sphDone(); else setStatus(stirStatus());
+}
+function _sphSplit(){   // рёбра длиннее split·L0 — вставка вершин на отрезок (геометрия та же); ядро в абсолютных единицах сохраняется
+  const s=_sph, q=s.cur, lim=s.C.split*L0, n=N; let need=false;
+  for(let i=0;i<n;i++) if(verts[i].distanceTo(verts[(i+1)%n])>lim){ need=true; break; }
+  if(!need) return 0;
+  const nv=[], nst=[], nU=[];
+  for(let i=0;i<n;i++){ const a=verts[i], b=verts[(i+1)%n]; nv.push(a.clone()); nst.push(q? q.stuck[i] : 0); nU.push(q? [q.U[3*i],q.U[3*i+1],q.U[3*i+2]] : [0,0,0]);
+    const len=a.distanceTo(b); if(len>lim){ const m=Math.ceil(len/L0); for(let t=1;t<m;t++){ nv.push(new THREE.Vector3().lerpVectors(a,b,t/m)); nst.push(0); nU.push([0,0,0]); } } }
+  const sOld=sExcl(), add=nv.length-n; _stirSetVerts(nv, L0); _inflate=Math.max(1e-4, Math.min(1, sOld/Math.max(1e-300, sNominal())));
+  if(q){ q.stuck=Uint8Array.from(nst); q.U=new Float64Array(3*N); for(let i=0;i<N;i++){ q.U[3*i]=nU[i][0]; q.U[3*i+1]=nU[i][1]; q.U[3*i+2]=nU[i][2]; } }
+  s.splits+=add; return add;
+}
+function _sphStep(){   // один сертифицированный шаг раздувания; true — Stir продолжается
+  const s=_sph, q=s.cur, C=s.C, n=N;
+  _closeCollect=[]; _closeThr=sExcl()+2.5*L0; _segGap=new Float64Array(n).fill(Infinity); _segGapRep=new Float64Array(n).fill(Infinity);
+  energyGrad(true, true);
+  const close=_closeCollect, segGap=_segGap, segRep=_segGapRep; _closeCollect=null; _segGap=null; _segGapRep=null;
+  const S=sExcl(), thr=S+3*L0, capG=Math.min(1.0*L0, 0.35*thr);
+  const gapV=new Float64Array(n), limV=new Float64Array(n);
+  for(let i=0;i<n;i++){ gapV[i]=Math.min(segGap[(i-1+n)%n], segGap[i], thr); const free=Math.min(segRep[(i-1+n)%n], segRep[i])-S; limV[i]=Math.min(0.35*gapV[i], Math.max(0.5*free, 0.15*L0)); }
+  const c=q.c, rho=q.r+q.a, st=q.stuck, U=q.U;
+  const Dx=new Float64Array(n), Dy=new Float64Array(n), Dz=new Float64Array(n);
+  for(let i=0;i<n;i++) if(st[i]){ const v=verts[i], d=Math.hypot(v.x-c[0], v.y-c[1], v.z-c[2]), need=rho-d; if(need>0){ Dx[i]=U[3*i]*need; Dy[i]=U[3*i+1]*need; Dz[i]=U[3*i+2]*need; } }
+  if(C.smooth>0){ const Sx=Float64Array.from(Dx), Sy=Float64Array.from(Dy), Sz=Float64Array.from(Dz); sobolevH1(C.smooth, Sx, Sy, Sz);   // свободные участки тянутся за прилипшими (сглаживание вдоль нити)
+    for(let i=0;i<n;i++) if(!st[i]){ Dx[i]=Sx[i]; Dy[i]=Sy[i]; Dz[i]=Sz[i]; } }
+  let rm=0; for(let i=0;i<n;i++) rm=Math.max(rm, Math.hypot(_fx[i],_fy[i],_fz[i]));
+  const wr=rm>1e-300 ? C.rep*capG/rm : 0; for(let i=0;i<n;i++){ Dx[i]+=wr*_fx[i]; Dy[i]+=wr*_fy[i]; Dz[i]+=wr*_fz[i]; }
+  for(let it=0; it<4 && close.length; it++){ let fixed=0;   // близкие чужие пары: сближающая составляющая снимается, поправка — свободным концам
+    for(let k=0;k<close.length;k+=8){ const i=close[k], j=close[k+1], si=close[k+2], tj=close[k+3], x=close[k+7]; if(!(x>1e-12)) continue;
+      const ip=(i+1)%n, jp=(j+1)%n, nx=close[k+4]/x, ny=close[k+5]/x, nz=close[k+6]/x;
+      const vrel=((1-si)*Dx[i]+si*Dx[ip]-(1-tj)*Dx[j]-tj*Dx[jp])*nx+((1-si)*Dy[i]+si*Dy[ip]-(1-tj)*Dy[j]-tj*Dy[jp])*ny+((1-si)*Dz[i]+si*Dz[ip]-(1-tj)*Dz[j]-tj*Dz[jp])*nz;
+      const vmin = x<S+0.05*L0 ? 0.5*capG : 0; if(vrel>=vmin) continue;
+      let wi=st[i]?0:(1-si), wip=st[ip]?0:si, wj=st[j]?0:(1-tj), wjp=st[jp]?0:tj; const sa=wi+wip, sb=wj+wjp; if(sa+sb<=1e-12) continue;
+      const qq=0.55*(vmin-vrel), qa=sb>1e-12? (sa>1e-12? qq : 0) : 2*qq, qb=sa>1e-12? (sb>1e-12? qq : 0) : 2*qq; fixed++;
+      if(sa>1e-12){ wi/=sa; wip/=sa; Dx[i]+=qa*nx*wi; Dy[i]+=qa*ny*wi; Dz[i]+=qa*nz*wi; Dx[ip]+=qa*nx*wip; Dy[ip]+=qa*ny*wip; Dz[ip]+=qa*nz*wip; }
+      if(sb>1e-12){ wj/=sb; wjp/=sb; Dx[j]-=qb*nx*wj; Dy[j]-=qb*ny*wj; Dz[j]-=qb*nz*wj; Dx[jp]-=qb*nx*wjp; Dy[jp]-=qb*ny*wjp; Dz[jp]-=qb*nz*wjp; } }
+    if(!fixed) break; }
+  for(let i=0;i<n;i++) if(st[i]){ const v=verts[i], d=Math.hypot(v.x-c[0], v.y-c[1], v.z-c[2]), ux=U[3*i], uy=U[3*i+1], uz=U[3*i+2];   // прилипшая: только по своему лучу и не внутрь сферы
+    const rad=Math.max(Dx[i]*ux+Dy[i]*uy+Dz[i]*uz, rho-d, 0); Dx[i]=ux*rad; Dy[i]=uy*rad; Dz[i]=uz*rad; }
+  let kk=1, ok=false, mvT=0; const x0=verts.map(v=>v.clone());
+  for(let tr=0; tr<3 && !ok; tr++){
+    for(let i=0;i<n;i++){ let dx=kk*Dx[i], dy=kk*Dy[i], dz=kk*Dz[i]; const d=Math.hypot(dx,dy,dz), lim=kk*Math.min(limV[i], capG);
+      if(d>lim && d>1e-300){ const f=lim/d; dx*=f; dy*=f; dz*=f; } verts[i].x=x0[i].x+dx; verts[i].y=x0[i].y+dy; verts[i].z=x0[i].z+dz; }
+    const e1=energyGrad(false); mvT=0; let okLocal=true;
+    for(let i=0;i<n;i++){ const d=verts[i].distanceTo(x0[i]); if(d>mvT) mvT=d; if(!(d<0.5*gapV[i])) okLocal=false; }
+    ok=isFinite(e1.E) && okLocal;
+    if(!ok){ for(let i=0;i<n;i++) verts[i].copy(x0[i]); kk*=0.35; if(!isFinite(e1.E)) _stir.rejInf++; else _stir.rejLoc++; } }
+  q.steps++; s.steps++; _stir.i++;
+  let grew=false;
+  if(ok){ s.acc++; _stir.moved+=mvT;
+    let lag=0; for(let i=0;i<n;i++){ const v=verts[i], dx=v.x-c[0], dy=v.y-c[1], dz=v.z-c[2], d=Math.hypot(dx,dy,dz);
+      if(!st[i]){ if(d<rho && d>1e-12){ st[i]=1; U[3*i]=dx/d; U[3*i+1]=dy/d; U[3*i+2]=dz/d; q.caught++; lag=Math.max(lag, rho-d); } }   // коснулась — прилипла
+      else lag=Math.max(lag, rho-d); }
+    if(lag<C.lag*L0 && q.r<q.R){ q.r=Math.min(q.R, q.r+C.dr*capG); grew=true; }   // прилипшие догнали поверхность — сфера растёт
+    _sphSplit(); }
+  else { _stir.rejected++; q.rej++; }
+  q.stallc = grew? 0 : q.stallc+1;
+  let end='';
+  if(q.r>=q.R-1e-12){ let lag=0; for(let i=0;i<N;i++) if(q.stuck[i]){ const v=verts[i]; lag=Math.max(lag, q.r+q.a-Math.hypot(v.x-q.c[0], v.y-q.c[1], v.z-q.c[2])); } if(lag<C.lag*L0) end='grown'; }
+  if(!end && q.stallc>=C.stall) end='stalled';
+  if(!end && q.steps>=C.stepsPer) end='step budget';
+  if(!end && _sphLen()>=s.Tcap) end='rope length cap';
+  if(end){ s.log.push({k:s.k, end, r0:+(q.r0/L0).toFixed(2), r:+(q.r/L0).toFixed(2), R:+(q.R/L0).toFixed(2), steps:q.steps, rej:q.rej, caught:q.caught, bins:q.bins, cnt:q.cnt, N, rope:+(_sphLen()/s.T0).toFixed(3)});
+    if(end==='rope length cap') s.why='rope length cap';
+    if(!(end!=='rope length cap' && _sphNext())) return _sphDone(); }
+  return true;
+}
+function _sphResample(){   // равномерная нить n'=round(T/L0) по дуге ломаной + сертификат; false — отказ (ломаная остаётся как есть)
+  const n=N, Lf=L0/STIR_SUB, fine=[];
+  for(let i=0;i<n;i++){ const a=verts[i], b=verts[(i+1)%n], len=a.distanceTo(b), m=Math.max(1, Math.ceil(len/Lf)); for(let t=0;t<m;t++){ const u=t/m; fine.push([a.x+(b.x-a.x)*u, a.y+(b.y-a.y)*u, a.z+(b.z-a.z)*u]); } }
+  const M=fine.length, cum=new Float64Array(M+1); for(let k=0;k<M;k++){ const a=fine[k], b=fine[(k+1)%M]; cum[k+1]=cum[k]+Math.hypot(b[0]-a[0], b[1]-a[1], b[2]-a[2]); }
+  const T=cum[M], n2=Math.max(4, Math.round(T/L0)), Y=[]; let k=0;
+  for(let j=0;j<n2;j++){ const sv=T*j/n2; while(k<M-1 && cum[k+1]<=sv) k++; const a=fine[k], b=fine[(k+1)%M], u=(sv-cum[k])/Math.max(1e-300, cum[k+1]-cum[k]); Y.push([a[0]+(b[0]-a[0])*u, a[1]+(b[1]-a[1])*u, a[2]+(b[2]-a[2])*u]); }
+  if(!stirResampleCert(fine, cum, T, Y)) return false;
+  const keep=verts.map(v=>v.clone()), sOld=sExcl();
+  _stirSetVerts(Y.map(y=>new THREE.Vector3(y[0], y[1], y[2])), L0); _inflate=Math.max(1e-4, Math.min(1, sOld/Math.max(1e-300, sNominal())));
+  const res=projectLengthsSafe(40); if(!(res<=0.05*L0)){ _setVertsFrom(keep); _inflate=Math.max(1e-4, Math.min(1, sOld/Math.max(1e-300, sNominal()))); return false; }
+  return true;
+}
+function _sphDone(){   // сферы закончены: передискретизация, затем разжатие контактов (или сразу серия); возвращает то же, что stirStep
+  const s=_sph; s.cur=null; s.resampled=_sphResample(); recenter(); s.N1=N; s.rope=+(_sphLen()/s.T0).toFixed(3);
+  { const g=energyGrad(false); if(!isFinite(g.E)){ const gr=minSegGapRep(); _inflate=Math.max(1e-4, Math.min(1, gr/(1.3*sNominal()))); } }   // ядро по зазорам (нить длиннее — ядро S∝N·L0 толще)
+  if(s.C.open){ _stir.mode='open'; _stir.R0=knotRadius(); _stirX0=verts.map(v=>v.clone()); _stir.disp=0; _stir.i=0; _stir.n=STIR_STEPS; _stir.target=STIR_AMP*Math.max(_stir.R0, 2*L0);
+    _stir.stall=0; _stir.rr=undefined; _stir._rj0=_stir.rejected; _stir.s=sNominal(); stirFieldContacts(); setStatus(stirStatus()); return true; }
+  stirFinish(); return false;
+}
+function _sphNote(){ const s=_sph; if(!s) return ''; return ' · '+s.log.length+(s.log.length===1?' sphere':' spheres')+' inflated (rope ×'+(s.rope||1).toFixed(2)+(s.why? '; '+s.why : '')+')'; }
 function stirStart(){
   if(running || _stir || !verts.length) return false;
   { const g=energyGrad(false);                       // ядро шире зазоров (ползунки сдвинуты после финала) — сдуть, стадия A раскроет заново
     if(!isFinite(g.E)){ const gr=minSegGapRep(); _inflate=Math.max(1e-4, Math.min(1, gr/(1.3*sNominal()))); if(!isFinite(energyGrad(false).E)){ showError('cannot stir: strands are inside the hard core'); return false; } } }
-  const kept=msWinsKeepBest(); _msSel=null; msSetShown(null);   // 2.40: Stir идёт от узла в главном виде (выбранного кликом или лучшего); выбор снят, окно — только лучшее
+  let kept=msWinsKeepBest(); _msSel=null; msSetShown(null); if(STIR_MODE==='spheres') kept=null;   // 6.0: после сфер нить длиннее — прежняя лучшая попытка (другая длина) в серию не переносится   // 2.40: Stir идёт от узла в главном виде (выбранного кликом или лучшего); выбор снят, окно — только лучшее
   _msCarry = kept ? {E:kept.E, verts:kept.verts.map(v=>v.clone()), note:kept.note||'', key:(kept.key!==undefined? kept.key : constsKey()), thick:thickOf(kept)} : null;   // лучшая попытка идёт в новую серию как №1
   _msEnergies = kept ? [kept.E] : []; _msBest=null; _msRound=0; _msK=1; _msPaused=false;
   const R0=knotRadius();
@@ -3685,8 +3825,9 @@ function stirStart(){
     const d0=_detRobust(3);
     _stirS0={verts:verts.map(v=>v.clone()), N, L0, det:(d0!==null? d0 : _runDet), s:sNominal()}; _stirN0=N;   // ядро — один раз (в воркере _thickFit другой); N0 — к нему возвращает фаза 3
     if(!same){ _stirHoles=[]; _stirSeed=1+Math.floor(Math.random()*1e6); } }
-  _stir.mode='remap?'; _stir.rej=[]; setStatus(STIR_MODE==='loops'? 'stirring… pulling loops out' : STIR_MODE==='open'? 'stirring… opening tight contacts' : STIR_MODE==='moves'? 'stirring… Reidemeister moves in 3D' : 'stirring… turning inside out');
+  _stir.mode='remap?'; _stir.rej=[]; setStatus(STIR_MODE==='loops'? 'stirring… pulling loops out' : STIR_MODE==='open'? 'stirring… opening tight contacts' : STIR_MODE==='moves'? 'stirring… Reidemeister moves in 3D' : STIR_MODE==='spheres'? 'stirring… looking for points enclosed by strands' : 'stirring… turning inside out');
   const run=()=>{ if(!_stir) return;
+    if(STIR_MODE==='spheres'){ _sphBegin(); return; }   // 6.0: сферы (дальше — контакты и серия)
     if(STIR_MODE==='moves'){ _mvBegin(); return; }   // 5.3: ходы Рейдемейстера в 3D
     if(STIR_MODE==='open'){ _stirS0=null; _stirHoles=[]; _stirN0=0; _stir.mode='open'; stirFieldContacts(); setStatus(stirStatus()); return; }   // разжатие контактов: итеративное, как растаскивание
     let rm=null; for(let t=0; t<STIR_REMAP_TRIES && !rm; t++){ rm=stirRemapOnce(_stirSeed++); if(!rm){ _stir.rej.push(_stirLastRej); if(_stirTerminal(_stirLastRej)) break; } }
@@ -3702,11 +3843,13 @@ function stirStart(){
   return true;
 }
 function stirPct(){ return _stir? Math.min(99, Math.round(100*Math.max(_stir.disp/Math.max(1e-12,_stir.target), _stir.i/_stir.n))) : 0; }
-function stirStatus(){ if(_stir && _stir.mode==='moves' && _mv) return 'stirring… Reidemeister move '+(_mv.moves+1)+' in 3D ('+_mv.kind+'), '+_mv.nc+' crossings in view ('+stirPct()+'%)';
+function stirStatus(){ if(_stir && _stir.mode==='spheres' && _sph){ const q=_sph.cur; return q? 'stirring… inflating sphere '+_sph.k+'/'+_sph.C.K+': radius '+Math.round(100*q.r/Math.max(1e-12,q.R))+'% · '+q.caught+' points stuck · rope ×'+(_sphLen()/_sph.T0).toFixed(2) : 'stirring… spheres done'; }
+  if(_stir && _stir.mode==='moves' && _mv) return 'stirring… Reidemeister move '+(_mv.moves+1)+' in 3D ('+_mv.kind+'), '+_mv.nc+' crossings in view ('+stirPct()+'%)';
   return 'stirring… '+(_stir&&_stir.mode==='open'? 'opening tight contacts' : 'pulling parts apart')+' ('+stirPct()+'%)'; }
 function stirStep(){
   if(!_stir) return false;
-  if(_stir.mode==='remap?') return true;                          // ремап ещё не выполнен (отложен на кадр)
+  if(_stir.mode==='remap?') return true;
+  if(_stir.mode==='spheres') return _sphStep();   // 6.0                          // ремап ещё не выполнен (отложен на кадр)
   const n=N; _closeCollect=[]; _closeThr=sExcl()+2.5*L0; _segGap=new Float64Array(n).fill(Infinity); _segGapRep=new Float64Array(n).fill(Infinity);   // контакты: все пары, способные войти в ядро за шаг (2 капа + запас)
   const g0=energyGrad(true, true), gm0=g0.gmin;                 // сила ТОЛЬКО отталкивания — помогает раздвинуть контакты
   const close=_closeCollect, segGap=_segGap, segRep=_segGapRep; _closeCollect=null; _segGap=null; _segGapRep=null;
@@ -3786,8 +3929,9 @@ function stirFinish(){
   startPhysics();
   if(st.mode==='moves' && _mv){ const P=_mvProject(verts, _mv.B); _mv.ncEnd=P? P.n : null; _dbgStir.moves=_mv.log; _dbgStir.mv={moves:_mv.moves, steps:_mv.steps, nc0:_mv.nc0, ncEnd:_mv.ncEnd, why:_mv.why}; }
   const wnote=' · Stir '+_stirWaveVar+': waves of '+(_stirWaveVar===1? 'stiffness' : _stirWaveVar===2? 'self-repulsion' : 'stiffness and self-repulsion')+' ×500'+(tight? ' (contacts too tight to open)' : '');
-  _stirWarn=warn; _stirNote = wnote+(st.mode==='moves' ? ' · stirred ('+(_mv? _mv.moves : 0)+' Reidemeister moves in 3D, crossings in view '+(_mv? _mv.nc0 : '?')+' → '+(_mv? _mv.ncEnd : '?')+(_mv && _mv.why? '; '+_mv.why : '')+')' : st.mode==='open' ? (tight? '' : ' · contacts opened '+dispR.toFixed(1)+'·R') : st.mode==='loops' ? ' · stirred ('+((st.remap&&st.remap.loops)? st.remap.loops.length : 0)+' loops out)' : st.mode==='invert' ? ' · stirred (inside out)' : ' · stirred (parts moved '+dispR.toFixed(1)+'·R'+(st.rej&&st.rej.length? '; remap rejected: '+st.rej.join(',') : '')+')');   // пометки на всю серию (startPhysics уже отработал)
-  _msStretchMild=true;
+  if(_sph){ _dbgStir.sph={log:_sph.log, rope:_sph.rope, N0:_sph.N0, N1:_sph.N1, splits:_sph.splits, resampled:_sph.resampled, why:_sph.why, steps:_sph.steps, acc:_sph.acc}; }
+  _stirWarn=warn; _stirNote = wnote+_sphNote()+(st.mode==='spheres' ? '' : st.mode==='moves' ? ' · stirred ('+(_mv? _mv.moves : 0)+' Reidemeister moves in 3D, crossings in view '+(_mv? _mv.nc0 : '?')+' → '+(_mv? _mv.ncEnd : '?')+(_mv && _mv.why? '; '+_mv.why : '')+')' : st.mode==='open' ? (tight? '' : ' · contacts opened '+dispR.toFixed(1)+'·R') : st.mode==='loops' ? ' · stirred ('+((st.remap&&st.remap.loops)? st.remap.loops.length : 0)+' loops out)' : st.mode==='invert' ? ' · stirred (inside out)' : ' · stirred (parts moved '+dispR.toFixed(1)+'·R'+(st.rej&&st.rej.length? '; remap rejected: '+st.rej.join(',') : '')+')');   // пометки на всю серию (startPhysics уже отработал)
+  _msStretchMild=true; _sph=null;
   if(runLog && _stirEv.length){ runLog.events=_stirEv.map(e=>({...e, st:0})); } _stirEv=[];
   setStatus(runStatus());
 }
@@ -3837,7 +3981,8 @@ function parBest(P){   // лучший среди готовых результ�
 function stirDeflateLive(){ updateGeomUnits(); const g=minSegGapRep(), sN=sNominal(); if(!(g>1.02*sN)) _inflate=Math.min(_inflate, Math.max(1e-4, g/(1.3*sN))); if(_stir) _stir.s=sN; }
 window.__knotStir=(k)=>{ if(!_stir && !stirStart()) return {started:false, running}; if(_stirPending){ const f=_stirPending; _stirPending=null; f(); } let c=0; while(_stir && c<(k||STIR_STEPS)){ stirStep(); c++; } return {stir:!!_stir, i:_stir?_stir.i:null, running, dbg:_dbgStir}; };
 window.__stirWaves=(v)=>{ if(v!==undefined) _stirWaveFix=v|0; return _stirWaveFix; };   // стенд: 1|2|3 — фиксированный вариант волн Stir, 0 — по кругу
-window.__stirMode=(m)=>{ if(m==='loops'||m==='invert'||m==='open'||m==='moves') STIR_MODE=m; return STIR_MODE; };   // стенд: режим Stir до __knotStir
+window.__stirMode=(m)=>{ if(m==='loops'||m==='invert'||m==='open'||m==='moves'||m==='spheres') STIR_MODE=m; return STIR_MODE; };
+window.__sphCfg=(o)=>{ if(o) window.__sph=Object.assign({}, window.__sph||{}, o); return _sphCfg(); };   // стенд: параметры сфер (K, diam, open, …)   // стенд: режим Stir до __knotStir
 window.__stirPin=(b)=>{ if(b!==undefined) STIR_PIN=!!b; return STIR_PIN; };   // стенд: пины до __knotStir (false — веер без фаз); в UI переключателя нет (2.40: пины всегда)
 function relaxStep(){
   if(!running || !verts.length) return;
