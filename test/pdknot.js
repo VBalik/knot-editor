@@ -2,7 +2,8 @@
 // spherogram), строится в программе как замкнутая ломаная с проходами из PD-кода — без распознавания картинки.
 // HK_FILE=<json> [HK_RUN=1 — Physics и Stir до UK_STIR раз, критерий окружности как в unknot.js] [HK_PNG=<файл> — вид 2D
 // (нужен KNOT_CANVAS=canvas2d.js)] [HK_SAVE=<json> — конечные 3D-точки] [HK_PROJ=<png> — проекция конечной 3D-формы] [UK_BUD, UK_STIR, UK_THICK/UK_REP/UK_BEND, UK_VERBOSE=1]
-(async ()=>{ const fs=__require('fs'), path=__require('path'), H=global.__H; window.__noAutoSave=true; window.__noWorkers=true; window.__noAutoThick=true;
+(async ()=>{ if(process.env.MODE && window.__stirMode) window.__stirMode(process.env.MODE);   // 7.1: MODE=open|msp — техника Stir (по умолчанию режим программы)
+ const fs=__require('fs'), path=__require('path'), H=global.__H; window.__noAutoSave=true; window.__noWorkers=true; window.__noAutoThick=true;
   const file=process.env.HK_FILE; if(!file) throw new Error('set HK_FILE=out/hard/<name>.json');
   const J=JSON.parse(fs.readFileSync(file,'utf8'));
   // --- ломаная вдоль цепочки стрелок; углы ортогональной укладки чуть скругляем промежуточными точками, чтобы сплайн не срезал их

@@ -3,7 +3,8 @@
 // Stir до UK_STIR раз → окружность? Критерий и счётчики — как в unknot.js. Параметры: IK_IMG, UK_STIR (10),
 // UK_BUD (30000 шагов на попытку), UK_THICK/UK_REP/UK_BEND (ползунки, физические значения), UK_VERBOSE=1,
 // HK_SAVE=<json> — конечные 3D-точки, HK_PROJ=<png> — проекция конечной 3D-формы (proj3d.js), HK_PDONLY=1 — только импорт и PD-код
-(async ()=>{ const fs=__require('fs'), path=__require('path'), mod=(n)=>__require(path.join(process.cwd(),'node_modules',n));
+(async ()=>{ if(process.env.MODE && window.__stirMode) window.__stirMode(process.env.MODE);   // 7.1: MODE=open|msp — техника Stir (по умолчанию режим программы)
+ const fs=__require('fs'), path=__require('path'), mod=(n)=>__require(path.join(process.cwd(),'node_modules',n));
   const H=global.__H; window.__noAutoSave=true; window.__noWorkers=true; window.__noAutoThick=true;
   const src=process.env.IK_IMG; if(!src) throw new Error('set IK_IMG=<image .png|.jpg>');
   const NSTIR=+(process.env.UK_STIR||10), BUD=+(process.env.UK_BUD||30000), VERB=process.env.UK_VERBOSE==='1';
