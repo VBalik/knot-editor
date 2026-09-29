@@ -2,7 +2,7 @@
 // Узел: HK_FILE=out/hard/<name>.json (укладка PD, как в pdknot.js) или KNOT=trefoil|figure8|cinquefoil|septafoil (пресет).
 // SP_PRE=<шагов> — физика до Stir (0 — прямо из базового лифта; по умолчанию 3000), SP_START=<json> — начать с сохранённой 3D-формы
 // (SP_SAVE прежнего прогона; без физики до Stir), SP_SAVE=<json> — сохранить 3D-форму перед Stir, SP_SAVE_EACH=<json> — форма после
-// каждой серии, SP_ONLY=1 — только Stir (без серии после), UK_STIR — число Stir-попыток (по умолчанию 6), UK_BUD — бюджет шагов
+// каждой серии, SP_SAVE_STIR=<json> — форма сразу после каждого Stir (до серии), SP_ONLY=1 — только Stir (без серии после), UK_STIR — число Stir-попыток (по умолчанию 6), UK_BUD — бюджет шагов
 // на попытку (30000), SP_TRIES — попыток в серии после Stir (1), SP_MODE=msp|open — техника Stir (msp — 7.0, open — разжатие
 // контактов 4.20), MSP_CFG='{json}' — параметры потока (window.__mspCfg, напр. '{"rho":4,"cut":0}'), SP_PROJ=<префикс> — проекции
 // 3D-формы до и после каждого Stir (PNG), SP_SEED — зерно Math.random (лифт, физика до Stir), UK_VERBOSE=1 — печать каждой записи. В каждой записи stirs[]: msp — сводка потока
@@ -65,6 +65,7 @@
     const ts=Date.now(); const rr=window.__knotStir(); if(!rr || rr.started===false){ out.stirs.push({at:attempt, started:false, running:H.running()}); break; } while(_stir) window.__knotStir();
     const stirMs=Date.now()-ts;
     if(process.env.SP_PROJ) proj(process.env.SP_PROJ+'_stir'+attempt+'.png');
+    if(process.env.SP_SAVE_STIR){ fs.mkdirSync(path.dirname(process.env.SP_SAVE_STIR),{recursive:true}); fs.writeFileSync(process.env.SP_SAVE_STIR.replace('.json','_'+attempt+'.json'), JSON.stringify({N, verts:verts.map(v=>[+v.x.toFixed(5),+v.y.toFixed(5),+v.z.toFixed(5)])})); }   // форма сразу после Stir (до серии)
     const d=_dbgStir||{}; if(d.ok===undefined) d.ok=!d.tooTight; if(d.tooTight) d.why='too tight';
     const scS=PP.simpNC(verts);
     const m=d.msp? Object.assign({}, d.msp) : null; if(m){ m.histTail=m.hist.slice(-3); delete m.hist; }
