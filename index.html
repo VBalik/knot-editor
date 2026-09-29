@@ -283,7 +283,7 @@ input[type=color]::-moz-color-swatch{border:none;border-radius:50%}
   <!-- ================= LEFT: 2D drawing ================= -->
   <div id="left" class="pane">
     <div class="topbar">
-      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">4.20</span></span>
+      <span class="paneTitle" id="editorTitle" style="text-transform:none">2D Editor <span id="appVer">7.0</span></span>
       <button id="restoreLast" title="Restore the last drawing from telemetry">Last</button><button id="clear" class="ghost">Clear</button>
       <span class="seg" id="presets" title="Example knots">
         <button class="ex" data-knot="trefoil" title="Trefoil 3₁">3₁</button>
@@ -3019,7 +3019,7 @@ function msRestoreBest(){   // вернуть лучшую попытку; её 
    другой центр/плоскость (STIR_REMAP_TRIES), затем запасной вариант — растаскивание 2.21. Каждая
    новая попытка серии после Stir (и каждый воркер) получает СВОЁ выворачивание исходной формы S0
    (другая «дыра»/плоскость) — максимальное разнообразие стартов. ---- */
-const STIR_SUB=8, STIR_REMAP_TRIES=6; let STIR_MODE='open';   // основная программа: Stir = разжатие тугих контактов (петли/выворачивание остаются в коде)
+const STIR_SUB=8, STIR_REMAP_TRIES=6; let STIR_MODE='msp';   // 7.0: Stir = поток медиальных сфер (MSP); разжатие контактов 4.20 ('open'), петли и выворачивание остаются в коде (стенд: window.__stirMode)
 const STIR_ARC=0.125, STIR_HR=[1.5,6], STIR_HMIN=0.25, STIR_SEP=45, STIR_K=[2,4], STIR_LEN=2.0, STIR_SKIP=0.3;   // 2026-09-14 по просьбе: петли вдвое уже (дуга 0.125·Rk) и больше (2–4), бюджет длины до n′≤3n
 // STIR_ARC — длина дуги (доля Rk); STIR_HR — высота петли H_t=U(1.5,6)·ρ_i, ρ_i=|X[i]−O| — исходное расстояние точки от центра (поправка E, 2026-09-13; H<0.8·1.5·ρ_i — отказ low);
 // STIR_HMIN — мин. высота бортов (доля Rk); STIR_SEP — мин. угол между направлениями петель (град); STIR_K — петель за ремап; STIR_LEN — кап добавки длины (доля N·L0):
@@ -3340,7 +3340,7 @@ function stirRemapLift(seed){   // выворачивание S0 в отдель
   if(r){ f=new Float32Array(N*3); for(let i=0;i<N;i++){ f[3*i]=verts[i].x; f[3*i+1]=verts[i].y; f[3*i+2]=verts[i].z; } }
   _stirSetVerts(keep, L0k); return f;   // N мог измениться (поправка F)
 }
-function stirCancel(){ _stirS0=null; _stirHoles=[]; _stirN0=0; _stirPins=null; _pinsFresh=false; _pinPos=null; _pinMob=null; _stirPending=null; physChgCancel(); if(!_stir) return; _stir=null; _stirX0=null; const p=document.getElementById('play'); if(p){ p.disabled=false; p.textContent='▶ Physics'; p.classList.remove('stir'); } _playStir=false; }
+function stirCancel(){ _msp=null; _stirS0=null; _stirHoles=[]; _stirN0=0; _stirPins=null; _pinsFresh=false; _pinPos=null; _pinMob=null; _stirPending=null; physChgCancel(); if(!_stir) return; _stir=null; _stirX0=null; const p=document.getElementById('play'); if(p){ p.disabled=false; p.textContent='▶ Physics'; p.classList.remove('stir'); } _playStir=false; }
 let _playStir=false;        // единая кнопка: после финала серии «▶ Physics» становится «Stir»
 function stirEnable(on){ const b=document.getElementById('play'); if(!b) return; _playStir=!!on;
   if(on){ b.textContent='▶ Stir'; b.classList.add('stir'); b.classList.remove('running'); b.disabled=false; }
@@ -3392,6 +3392,267 @@ function stirFieldContacts(){
   if(mx>1e-300) for(let i=0;i<n;i++){ _stirUx[i]/=mx; _stirUy[i]/=mx; _stirUz[i]/=mx; }
   if(_stir){ _stir.fields++; _stir.opened=taken; }
 }
+/* ============================================================================
+   7.0: STIR «MSP» — ПОТОК МЕДИАЛЬНЫХ СФЕР С ТОЧНЫМ СЕРТИФИКАТОМ ТРАЕКТОРИИ
+   По документу CONTINUOUS_3D_ALGORITHM.md и файлам msp_numpy.py / msp_project_contacts.py /
+   simultaneous_certifier.py (папка Codex/Knots пользователя; основа — Medial Sphere Preconditioning,
+   Noma–Singh–Jacobson, SIGGRAPH Asia 2025). Узел — замкнутая ломаная в R³ без диаграммы и без толщины;
+   длина нити может меняться. Один шаг:
+   1. Свободное пространство: у каждой вершины K лучей в плоскости, перпендикулярной касательной; по лучу u —
+      наибольший пустой шар, касающийся нити в вершине: r = min_j |d|²/(2 u·d) (d = x_j − x_i, u·d > 0), кап r_max.
+      Центры c = x + r·u, среднее c̄ — «медиальная» точка, куда вершину тянет свободное пространство.
+   2. Согласованное движение: квадратичная модель Ê(Y) = Σ|y_{i+1}−y_i|²/ℓ_i + α Σ w_i (1/K) Σ_a |y_i − c_ia|²
+      (α = (3.36/ρ)²), градиент g = 2LX + 2αM(X − C̄); направление d = −A⁻¹g, A = L + βC + D + μM: L — лапласиан
+      цепочки (веса 1/ℓ), C — лапласиан связей «вершина ↔ вершина, задавшая её сферу» (веса β/r: соседние пряди
+      идут вместе, а не сквозь друг друга), D — диагональ для лучей, упёршихся в r_max, M = diag(w). Три правые
+      части (x, y, z), сопряжённые градиенты с диагональным предобусловливателем. Длина шага — точный минимум
+      квадратичной модели вдоль d (кап 1), затем внешний множитель h с делением пополам.
+   3. Контакты (по желанию): для близких несмежных рёбер с ближайшими точками p, q и нормалью n = (p−q)/|p−q|
+      скорости проектируются на n·[(1−s)v_A + s v_B − (1−t)v_C − t v_D] ≥ b (Хилдрет, b = 0 — не сближаться).
+   4. СЕРТИФИКАТ ВСЕЙ ТРАЕКТОРИИ x_i(τ) = (1−τ)x_i + τ q_i, τ ∈ [0,1]: для каждой пары несмежных движущихся рёбер —
+      ось, по которой проекции концов строго разделены на обоих концах интервала (проекции линейны по τ, значит и
+      внутри); нет оси — интервал делится пополам, оси выбираются заново (глубина ≤ MSP depth). Смежные рёбра:
+      плоскость через общую вершину, соседи по разные стороны (нет схлопывания и наложения). Дешёвый предтест —
+      липшицев: сдвиги концов δ_i + δ_j < зазор. Отказ → h/2; MSP_BT отказов подряд — шаг не найден.
+   5. Длинные рёбра делятся пополам (точная операция, N растёт до MSP_NMAX·N0). Когда поток остановился (нет
+      сертифицированного шага MSP stall раз подряд, лимит шагов/времени) или проекция формы не имеет пересечений
+      (узел распутан) — форма масштабируется к исходной длине нити (подобие — изотопия), ресэмплируется в N0
+      равных рёбер (stirResampleCert) и уходит в серию попыток с волнами, как в 4.20.
+   Замечание: MSP укорачивает нить (кривая «садится»); толщина трубки в программе ∝ длине нити, поэтому картинка
+   масштабно-свободна — видна только смена формы. Свободный радиус ρ задаётся в единицах ядра s = sNominal() на
+   момент старта и дальше фиксирован (как у авторов), контактный порог — в текущих s.
+   ============================================================================ */
+const MSP_DEF={rho:2.5, K:16, beta:0.01, mu:16, step:1, bt:20, cg:200, cut:1.0, sep:0, depth:12, maxSteps:400, stall:1, budgetMs:90000, split:2.0, nmax:2.0, minShrink:0.15};
+   // rho — свободный радиус ρ в единицах s (r_max = 0.9ρ); K — лучей; beta, mu — веса C и M в A; step — стартовый множитель шага (1 — точный минимум
+   // квадратичной модели вдоль d: модель мажорирует длину, поэтому длина+свободное пространство не растут; >1 — перелёт, для опытов: у авторов step 10 на Фридмане);
+   // bt — делений пополам; cg — итераций CG; cut — порог контактной проекции (в s, 0 — без неё); sep — скорость раскрытия контакта (доля cut·s);
+   // depth — глубина бисекции сертификата; maxSteps — принятых шагов за Stir; stall — отказов подряд до остановки; budgetMs — время;
+   // split — рёбра длиннее split·ℓ̄ делятся; nmax — кап N/N0; minShrink — стоп, если нить укоротилась до этой доли (форма выродилась)
+let _mspCfg=Object.assign({}, MSP_DEF), _msp=null;
+window.__mspCfg=(o)=>{ if(o) Object.assign(_mspCfg, o); return _mspCfg; };   // стенд: параметры до __knotStir
+function _mspSegSeg(ax,ay,az, bx,by,bz, cx,cy,cz, dx,dy,dz, out){   // ближайшие точки отрезков AB, CD: out=[s,t,dist,nx,ny,nz] (n — от CD к AB)
+  const ux=bx-ax, uy=by-ay, uz=bz-az, vx=dx-cx, vy=dy-cy, vz=dz-cz, wx=ax-cx, wy=ay-cy, wz=az-cz;
+  const a=ux*ux+uy*uy+uz*uz, b=ux*vx+uy*vy+uz*vz, c=vx*vx+vy*vy+vz*vz, d=ux*wx+uy*wy+uz*wz, e=vx*wx+vy*wy+vz*wz, D=a*c-b*b;
+  let s, t;
+  if(D>1e-14*a*c){ s=(b*e-c*d)/D; t=(a*e-b*d)/D; } else { s=0; t= c>0? e/c : 0; }
+  if(s<0) s=0; else if(s>1) s=1;
+  t=(b*s+e)/(c||1e-300); if(t<0){ t=0; s=Math.max(0, Math.min(1, -d/(a||1e-300))); } else if(t>1){ t=1; s=Math.max(0, Math.min(1, (b-d)/(a||1e-300))); }
+  const px=ax+ux*s-(cx+vx*t), py=ay+uy*s-(cy+vy*t), pz=az+uz*s-(cz+vz*t); const l=Math.sqrt(px*px+py*py+pz*pz);
+  out[0]=s; out[1]=t; out[2]=l; if(l>1e-300){ out[3]=px/l; out[4]=py/l; out[5]=pz/l; } else { out[3]=out[4]=out[5]=0; } return l;
+}
+function mspInit(){   // состояние потока из текущих verts
+  const n=N, X=new Float64Array(n), Y=new Float64Array(n), Z=new Float64Array(n);
+  for(let i=0;i<n;i++){ X[i]=verts[i].x; Y[i]=verts[i].y; Z[i]=verts[i].z; }
+  const s0=sNominal(), rho=_mspCfg.rho*s0, R0=knotRadius();
+  _msp={X,Y,Z, n, N0:n, L00:L0, Lr0:n*L0, s0, rho, alpha:(3.36/rho)*(3.36/rho), h:_mspCfg.step, acc:0, rej:0, iters:0, stall:0, t0:(typeof performance!=='undefined'? performance.now() : Date.now()),
+        cross0:_projCrossCount(verts), cross:-1, hist:[], why:'', moved:0, R0, cgIt:0, certMs:0, cgMs:0, sphMs:0, sub:0, sat:0, lip:0, contacts:0};
+  _msp.cross=_msp.cross0;
+  _stir.n=_mspCfg.maxSteps; _stir.target=1; _stir.disp=0;
+}
+function _mspNow(){ return typeof performance!=='undefined'? performance.now() : Date.now(); }
+function _mspSpheres(S){   // свободное пространство: центры c̄ и связи (owner) для K лучей; сетка по вершинам радиуса 2·r_max
+  const n=S.n, X=S.X, Y=S.Y, Z=S.Z, K=_mspCfg.K, rmax=0.9*S.rho, h=2*rmax;
+  const cbx=new Float64Array(n), cby=new Float64Array(n), cbz=new Float64Array(n);
+  const own=new Int32Array(n*K), rad=new Float64Array(n*K);
+  let lo0=Infinity, lo1=Infinity, lo2=Infinity; for(let i=0;i<n;i++){ if(X[i]<lo0) lo0=X[i]; if(Y[i]<lo1) lo1=Y[i]; if(Z[i]<lo2) lo2=Z[i]; }
+  const cell=new Map(), key=(a,b,c)=>((a*73856093)^(b*19349663)^(c*83492791));
+  const gx=new Int32Array(n), gy=new Int32Array(n), gz=new Int32Array(n);
+  for(let i=0;i<n;i++){ gx[i]=Math.floor((X[i]-lo0)/h); gy[i]=Math.floor((Y[i]-lo1)/h); gz[i]=Math.floor((Z[i]-lo2)/h); const k=key(gx[i],gy[i],gz[i]); let a=cell.get(k); if(!a){ a=[]; cell.set(k,a); } a.push(i); }
+  const cosA=new Float64Array(K), sinA=new Float64Array(K); for(let a=0;a<K;a++){ const ang=2*Math.PI*(a+1)/K; cosA[a]=Math.cos(ang); sinA[a]=Math.sin(ang); }
+  const rr=new Float64Array(K), oo=new Int32Array(K), r2max=h*h;
+  for(let i=0;i<n;i++){
+    const im=(i-1+n)%n, ip=(i+1)%n; let tx=X[ip]-X[im], ty=Y[ip]-Y[im], tz=Z[ip]-Z[im]; let tl=Math.hypot(tx,ty,tz);
+    if(!(tl>1e-300)){ tx=X[ip]-X[i]; ty=Y[ip]-Y[i]; tz=Z[ip]-Z[i]; tl=Math.hypot(tx,ty,tz)||1; } tx/=tl; ty/=tl; tz/=tl;
+    let hx=1, hy=0, hz=0; if(Math.abs(tx)>0.999){ hx=0; hy=1; }
+    let nx=ty*hz-tz*hy, ny=tz*hx-tx*hz, nz=tx*hy-ty*hx; const nl=Math.hypot(nx,ny,nz)||1; nx/=nl; ny/=nl; nz/=nl;
+    const bx=ny*tz-nz*ty, by=nz*tx-nx*tz, bz=nx*ty-ny*tx;
+    for(let a=0;a<K;a++){ rr[a]=rmax; oo[a]=-1; }
+    const xi=X[i], yi=Y[i], zi=Z[i];
+    for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++){ const arr=cell.get(key(gx[i]+dx,gy[i]+dy,gz[i]+dz)); if(!arr) continue;
+      for(const j of arr){ if(j===i) continue; const ddx=X[j]-xi, ddy=Y[j]-yi, ddz=Z[j]-zi, d2=ddx*ddx+ddy*ddy+ddz*ddz; if(d2>r2max) continue;
+        const pn=ddx*nx+ddy*ny+ddz*nz, pb=ddx*bx+ddy*by+ddz*bz;   // проекция d на плоскость лучей: u_a·d = pb·cos + pn·sin
+        for(let a=0;a<K;a++){ const ud=pb*cosA[a]+pn*sinA[a]; if(ud<=1e-15) continue; const r=d2/(2*ud); if(r<rr[a]){ rr[a]=r; oo[a]=j; } } } }
+    let sx=0, sy=0, sz=0; for(let a=0;a<K;a++){ const r=rr[a], ux=bx*cosA[a]+nx*sinA[a], uy=by*cosA[a]+ny*sinA[a], uz=bz*cosA[a]+nz*sinA[a]; sx+=r*ux; sy+=r*uy; sz+=r*uz; own[i*K+a]=oo[a]; rad[i*K+a]=r; }
+    cbx[i]=xi+sx/K; cby[i]=yi+sy/K; cbz[i]=zi+sz/K;
+  }
+  return {cbx,cby,cbz,own,rad};
+}
+function _mspDirection(S){   // d = −A⁻¹g, три правые части, CG с диагональным предобусловливателем; возвращает {dx,dy,dz,amount,gnorm}
+  const n=S.n, X=S.X, Y=S.Y, Z=S.Z, K=_mspCfg.K, beta=_mspCfg.beta, mu=_mspCfg.mu, alpha=S.alpha;
+  const len=new Float64Array(n), w=new Float64Array(n);
+  for(let i=0;i<n;i++){ const ip=(i+1)%n; len[i]=Math.max(1e-300, Math.hypot(X[ip]-X[i],Y[ip]-Y[i],Z[ip]-Z[i])); }
+  for(let i=0;i<n;i++) w[i]=0.5*(len[(i-1+n)%n]+len[i]);
+  const t0=_mspNow(); const sph=_mspSpheres(S); S.sphMs+=_mspNow()-t0;
+  // матрица A: диагональ + список связей (i<j, вес); L — цепочка, C — связи сфер (пара один раз), D — кап r_max, M — масса
+  const diag=new Float64Array(n); const li=[], lj=[], lw=[];
+  for(let i=0;i<n;i++){ const ip=(i+1)%n, wl=1/len[i]; diag[i]+=wl; diag[ip]+=wl; li.push(i); lj.push(ip); lw.push(wl); }
+  const nL=li.length;   // связи цепочки идут первыми — они же нужны для L·d
+  const seen=new Set();
+  for(let i=0;i<n;i++) for(let a=0;a<K;a++){ const j=sph.own[i*K+a], wc=beta/Math.max(sph.rad[i*K+a],1e-15);
+    if(j<0){ diag[i]+=wc; continue; } const p=i<j? i*n+j : j*n+i; if(seen.has(p)) continue; seen.add(p); diag[i]+=wc; diag[j]+=wc; li.push(i); lj.push(j); lw.push(wc); }
+  for(let i=0;i<n;i++) diag[i]+=mu*w[i];
+  const m=li.length, LI=Int32Array.from(li), LJ=Int32Array.from(lj), LW=Float64Array.from(lw);
+  const Amul=(x,y)=>{ for(let i=0;i<n;i++) y[i]=diag[i]*x[i]; for(let q=0;q<m;q++){ const i=LI[q], j=LJ[q], ww=LW[q]; y[i]-=ww*x[j]; y[j]-=ww*x[i]; } };
+  const Lmul=(x,y)=>{ y.fill(0); for(let q=0;q<nL;q++){ const i=LI[q], j=LJ[q], ww=LW[q]; const d=x[i]-x[j]; y[i]+=ww*d; y[j]-=ww*d; } };
+  // градиент g = 2LX + 2αM(X − C̄)
+  const gx=new Float64Array(n), gy=new Float64Array(n), gz=new Float64Array(n), tmp=new Float64Array(n);
+  Lmul(X,tmp); for(let i=0;i<n;i++) gx[i]=2*tmp[i]+2*alpha*w[i]*(X[i]-sph.cbx[i]);
+  Lmul(Y,tmp); for(let i=0;i<n;i++) gy[i]=2*tmp[i]+2*alpha*w[i]*(Y[i]-sph.cby[i]);
+  Lmul(Z,tmp); for(let i=0;i<n;i++) gz[i]=2*tmp[i]+2*alpha*w[i]*(Z[i]-sph.cbz[i]);
+  let gnorm=0; for(let i=0;i<n;i++) gnorm+=Math.hypot(gx[i],gy[i],gz[i]); gnorm/=n;
+  // CG: A d = −g
+  const t1=_mspNow();
+  const solve=(b)=>{ const x=new Float64Array(n), r=new Float64Array(n), z=new Float64Array(n), p=new Float64Array(n), Ap=new Float64Array(n);
+    let bn=0; for(let i=0;i<n;i++){ r[i]=-b[i]; bn+=r[i]*r[i]; } if(!(bn>0)) return x;
+    for(let i=0;i<n;i++){ z[i]=r[i]/diag[i]; p[i]=z[i]; } let rz=0; for(let i=0;i<n;i++) rz+=r[i]*z[i];
+    let it=0; for(; it<_mspCfg.cg; it++){ Amul(p,Ap); let pAp=0; for(let i=0;i<n;i++) pAp+=p[i]*Ap[i]; if(!(pAp>0)) break; const al=rz/pAp;
+      let rn=0; for(let i=0;i<n;i++){ x[i]+=al*p[i]; r[i]-=al*Ap[i]; rn+=r[i]*r[i]; } if(rn<=1e-20*bn) { it++; break; }
+      for(let i=0;i<n;i++) z[i]=r[i]/diag[i]; let rz2=0; for(let i=0;i<n;i++) rz2+=r[i]*z[i]; const be=rz2/rz; rz=rz2; for(let i=0;i<n;i++) p[i]=z[i]+be*p[i]; }
+    S.cgIt+=it; return x; };
+  const dx=solve(gx), dy=solve(gy), dz=solve(gz); S.cgMs+=_mspNow()-t1;
+  // точный минимум квадратичной модели вдоль d (кап 1)
+  let gd=0, curv=0; for(let i=0;i<n;i++){ gd+=gx[i]*dx[i]+gy[i]*dy[i]+gz[i]*dz[i]; curv+=2*alpha*w[i]*(dx[i]*dx[i]+dy[i]*dy[i]+dz[i]*dz[i]); }
+  Lmul(dx,tmp); for(let i=0;i<n;i++) curv+=2*dx[i]*tmp[i]; Lmul(dy,tmp); for(let i=0;i<n;i++) curv+=2*dy[i]*tmp[i]; Lmul(dz,tmp); for(let i=0;i<n;i++) curv+=2*dz[i]*tmp[i];
+  const amount = curv>0 ? Math.min(1, Math.max(0, -gd/curv)) : 0;
+  for(let i=0;i<n;i++){ dx[i]*=amount; dy[i]*=amount; dz[i]*=amount; }
+  return {dx,dy,dz,amount,gnorm,len,w};
+}
+function _mspContacts(S, D){   // проекция скоростей на условия «не сближаться» для близких несмежных рёбер (Хилдрет); возвращает число контактов
+  const n=S.n, X=S.X, Y=S.Y, Z=S.Z, cut=_mspCfg.cut*sNominal(), dx=D.dx, dy=D.dy, dz=D.dz; if(!(cut>0)) return 0;
+  let emax=0; for(let i=0;i<n;i++) if(D.len[i]>emax) emax=D.len[i];
+  const h=cut+emax, mx=new Float64Array(n), my=new Float64Array(n), mz=new Float64Array(n); let lo0=Infinity, lo1=Infinity, lo2=Infinity;
+  for(let i=0;i<n;i++){ const ip=(i+1)%n; mx[i]=0.5*(X[i]+X[ip]); my[i]=0.5*(Y[i]+Y[ip]); mz[i]=0.5*(Z[i]+Z[ip]); if(mx[i]<lo0) lo0=mx[i]; if(my[i]<lo1) lo1=my[i]; if(mz[i]<lo2) lo2=mz[i]; }
+  const cell=new Map(), key=(a,b,c)=>((a*73856093)^(b*19349663)^(c*83492791)); const gx=new Int32Array(n), gy=new Int32Array(n), gz=new Int32Array(n);
+  for(let i=0;i<n;i++){ gx[i]=Math.floor((mx[i]-lo0)/h); gy[i]=Math.floor((my[i]-lo1)/h); gz[i]=Math.floor((mz[i]-lo2)/h); const k=key(gx[i],gy[i],gz[i]); let a=cell.get(k); if(!a){ a=[]; cell.set(k,a); } a.push(i); }
+  const C=[], o=new Float64Array(6), R2=h*h;
+  for(let i=0;i<n;i++){ const ip=(i+1)%n;
+    for(let ddx=-1;ddx<=1;ddx++) for(let ddy=-1;ddy<=1;ddy++) for(let ddz=-1;ddz<=1;ddz++){ const arr=cell.get(key(gx[i]+ddx,gy[i]+ddy,gz[i]+ddz)); if(!arr) continue;
+      for(const j of arr){ if(j<=i) continue; const cd=Math.min(j-i, n-(j-i)); if(cd<2) continue; const jp=(j+1)%n;
+        const qx=mx[j]-mx[i], qy=my[j]-my[i], qz=mz[j]-mz[i]; if(qx*qx+qy*qy+qz*qz>R2) continue;
+        const l=_mspSegSeg(X[i],Y[i],Z[i], X[ip],Y[ip],Z[ip], X[j],Y[j],Z[j], X[jp],Y[jp],Z[jp], o); if(!(l<cut) || !(l>1e-300)) continue;
+        const s=o[0], t=o[1]; C.push({idx:[i,ip,j,jp], co:[1-s, s, -(1-t), -t], nx:o[3], ny:o[4], nz:o[5], norm2:(1-s)*(1-s)+s*s+(1-t)*(1-t)+t*t, b:_mspCfg.sep*cut*(1-l/cut)}); } } }
+  if(!C.length) return 0;
+  const dual=new Float64Array(C.length);
+  for(let sweep=0; sweep<40; sweep++){ let big=0;
+    for(let k=0;k<C.length;k++){ const c=C[k]; let val=0; for(let q=0;q<4;q++){ const v=c.idx[q]; val+=c.co[q]*(dx[v]*c.nx+dy[v]*c.ny+dz[v]*c.nz); }
+      const nd=Math.max(0, dual[k]+(c.b-val)/c.norm2), ch=nd-dual[k]; if(ch===0) continue; dual[k]=nd;
+      for(let q=0;q<4;q++){ const v=c.idx[q], f=ch*c.co[q]; dx[v]+=f*c.nx; dy[v]+=f*c.ny; dz[v]+=f*c.nz; } big=Math.max(big, Math.abs(ch)*Math.sqrt(c.norm2)); }
+    if(big<=1e-12) break; }
+  return C.length;
+}
+function _mspCertify(S, Q, eps){   // сертификат всей линейной траектории X→Q (см. п.4 заголовка); true — вложенность доказана
+  const n=S.n, X=S.X, Y=S.Y, Z=S.Z, QX=Q[0], QY=Q[1], QZ=Q[2], depthMax=_mspCfg.depth;
+  const lo=new Float64Array(3*n), hi=new Float64Array(3*n), del=new Float64Array(n);
+  for(let i=0;i<n;i++){ del[i]=Math.hypot(QX[i]-X[i],QY[i]-Y[i],QZ[i]-Z[i]); }
+  for(let i=0;i<n;i++){ const ip=(i+1)%n;
+    lo[3*i]=Math.min(X[i],X[ip],QX[i],QX[ip]); hi[3*i]=Math.max(X[i],X[ip],QX[i],QX[ip]);
+    lo[3*i+1]=Math.min(Y[i],Y[ip],QY[i],QY[ip]); hi[3*i+1]=Math.max(Y[i],Y[ip],QY[i],QY[ip]);
+    lo[3*i+2]=Math.min(Z[i],Z[ip],QZ[i],QZ[ip]); hi[3*i+2]=Math.max(Z[i],Z[ip],QZ[i],QZ[ip]); }
+  const ord=new Int32Array(n); for(let i=0;i<n;i++) ord[i]=i; ord.sort((a,b)=>lo[3*a]-lo[3*b]);
+  const o=new Float64Array(6);
+  // проекция вершины v в момент τ (τ = num/den) на ось ax: линейна по τ
+  const P=(v, ax,ay,az, num, den)=>{ const t=num/den; return ax*((1-t)*X[v]+t*QX[v])+ay*((1-t)*Y[v]+t*QY[v])+az*((1-t)*Z[v]+t*QZ[v]); };
+  const M=(v, num, den, out, k)=>{ const t=num/den; out[k]=(1-t)*X[v]+t*QX[v]; out[k+1]=(1-t)*Y[v]+t*QY[v]; out[k+2]=(1-t)*Z[v]+t*QZ[v]; };
+  const mid=new Float64Array(12);
+  const sepPair=(i,ip,j,jp, ax,ay,az, lo_,hi_, den)=>{ const al=Math.hypot(ax,ay,az); if(!(al>1e-300)) return false; const e=eps*al; let orient=0;
+    for(let q=0;q<2;q++){ const num=q? hi_ : lo_; const a=P(i,ax,ay,az,num,den), b=P(ip,ax,ay,az,num,den), c=P(j,ax,ay,az,num,den), d=P(jp,ax,ay,az,num,den);
+      let sg; if(Math.min(a,b)>Math.max(c,d)+e) sg=1; else if(Math.max(a,b)<Math.min(c,d)-e) sg=-1; else return false; if(orient && sg!==orient) return false; orient=sg; }
+    return true; };
+  const provePair=(i,j, lo_,hi_,den, depth)=>{ const ip=(i+1)%n, jp=(j+1)%n; const num=lo_+hi_, den2=2*den;   // оси — по геометрии в середине интервала
+    M(i,num,den2,mid,0); M(ip,num,den2,mid,3); M(j,num,den2,mid,6); M(jp,num,den2,mid,9);
+    const ux=mid[3]-mid[0], uy=mid[4]-mid[1], uz=mid[5]-mid[2], vx=mid[9]-mid[6], vy=mid[10]-mid[7], vz=mid[11]-mid[8];
+    if(sepPair(i,ip,j,jp, uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx, lo_,hi_,den)) return true;
+    const uu=ux*ux+uy*uy+uz*uz, vv=vx*vx+vy*vy+vz*vz;
+    for(let q=6;q<=9;q+=3){ const wx=mid[q]-mid[0], wy=mid[q+1]-mid[1], wz=mid[q+2]-mid[2], wu=wx*ux+wy*uy+wz*uz; if(sepPair(i,ip,j,jp, wx*uu-ux*wu, wy*uu-uy*wu, wz*uu-uz*wu, lo_,hi_,den)) return true; }
+    for(let q=0;q<=3;q+=3){ const wx=mid[q]-mid[6], wy=mid[q+1]-mid[7], wz=mid[q+2]-mid[8], wv=wx*vx+wy*vy+wz*vz; if(sepPair(i,ip,j,jp, wx*vv-vx*wv, wy*vv-vy*wv, wz*vv-vz*wv, lo_,hi_,den)) return true; }
+    for(let q=0;q<=3;q+=3) for(let r=6;r<=9;r+=3){ if(sepPair(i,ip,j,jp, mid[q]-mid[r], mid[q+1]-mid[r+1], mid[q+2]-mid[r+2], lo_,hi_,den)) return true; }
+    if(depth>=depthMax) return false; S.sub++;
+    return provePair(i,j, 2*lo_, lo_+hi_, 2*den, depth+1) && provePair(i,j, lo_+hi_, 2*hi_, 2*den, depth+1); };
+  const sepAdj=(l,s,r, ax,ay,az, lo_,hi_,den)=>{ const al=Math.hypot(ax,ay,az); if(!(al>1e-300)) return false; const e=eps*al; let orient=0;
+    for(let q=0;q<2;q++){ const num=q? hi_ : lo_; const ps=P(s,ax,ay,az,num,den), u=P(l,ax,ay,az,num,den)-ps, v=P(r,ax,ay,az,num,den)-ps;
+      let sg; if(u>e && v<-e) sg=1; else if(u<-e && v>e) sg=-1; else return false; if(orient && sg!==orient) return false; orient=sg; }
+    return true; };
+  const proveAdj=(l,s,r, lo_,hi_,den, depth)=>{ const num=lo_+hi_, den2=2*den; M(l,num,den2,mid,0); M(s,num,den2,mid,3); M(r,num,den2,mid,6);
+    const ux=mid[0]-mid[3], uy=mid[1]-mid[4], uz=mid[2]-mid[5], vx=mid[6]-mid[3], vy=mid[7]-mid[4], vz=mid[8]-mid[5];
+    if(sepAdj(l,s,r, ux-vx, uy-vy, uz-vz, lo_,hi_,den)) return true;
+    const uu=ux*ux+uy*uy+uz*uz, vv=vx*vx+vy*vy+vz*vz, uv=ux*vx+uy*vy+uz*vz;
+    if(sepAdj(l,s,r, ux*(vv+uv)-vx*(uu+uv), uy*(vv+uv)-vy*(uu+uv), uz*(vv+uv)-vz*(uu+uv), lo_,hi_,den)) return true;
+    if(depth>=depthMax) return false; S.sub++;
+    return proveAdj(l,s,r, 2*lo_, lo_+hi_, 2*den, depth+1) && proveAdj(l,s,r, lo_+hi_, 2*hi_, 2*den, depth+1); };
+  for(let i=0;i<n;i++){ if(!proveAdj(i,(i+1)%n,(i+2)%n, 0,1,1, 0)) { S.failAdj=i; return false; } }   // смежные рёбра: не схлопываются и не накладываются
+  for(let a=0;a<n;a++){ const i=ord[a], ip=(i+1)%n, hx=hi[3*i]+eps;
+    for(let b=a+1;b<n;b++){ const j=ord[b]; if(lo[3*j]>hx) break;
+      if(lo[3*j+1]>hi[3*i+1]+eps || hi[3*j+1]<lo[3*i+1]-eps || lo[3*j+2]>hi[3*i+2]+eps || hi[3*j+2]<lo[3*i+2]-eps) continue;
+      const cd=Math.min(Math.abs(j-i), n-Math.abs(j-i)); if(cd<2) continue; const jp=(j+1)%n;
+      const g=_mspSegSeg(X[i],Y[i],Z[i], X[ip],Y[ip],Z[ip], X[j],Y[j],Z[j], X[jp],Y[jp],Z[jp], o);
+      if(g>Math.max(del[i],del[ip])+Math.max(del[j],del[jp])+eps){ S.lip++; continue; }   // липшицев предтест: сдвинуться до касания не успевают
+      S.sat++; if(!provePair(Math.min(i,j), Math.max(i,j), 0,1,1, 0)){ S.failPair=[i,j]; return false; } } }
+  return true;
+}
+function _mspSubdivide(S){   // длинные рёбра пополам (точная операция: форма не меняется); true — N изменилось
+  const n=S.n, X=S.X, Y=S.Y, Z=S.Z; let tl=0; for(let i=0;i<n;i++) tl+=Math.hypot(X[(i+1)%n]-X[i],Y[(i+1)%n]-Y[i],Z[(i+1)%n]-Z[i]);
+  const lim=_mspCfg.split*tl/n, cap=Math.round(_mspCfg.nmax*S.N0); if(n>=cap) return false;
+  const nx=[], ny=[], nz=[]; let add=0;
+  for(let i=0;i<n;i++){ const ip=(i+1)%n; nx.push(X[i]); ny.push(Y[i]); nz.push(Z[i]);
+    if(n+add<cap && Math.hypot(X[ip]-X[i],Y[ip]-Y[i],Z[ip]-Z[i])>lim){ nx.push(0.5*(X[i]+X[ip])); ny.push(0.5*(Y[i]+Y[ip])); nz.push(0.5*(Z[i]+Z[ip])); add++; } }
+  if(!add) return false;
+  S.X=Float64Array.from(nx); S.Y=Float64Array.from(ny); S.Z=Float64Array.from(nz); S.n=nx.length; return true;
+}
+function _mspSync(S){   // состояние → verts (N, L0, трубка)
+  const n=S.n; if(n!==N){ const vs=[]; for(let i=0;i<n;i++) vs.push(new THREE.Vector3(S.X[i],S.Y[i],S.Z[i])); _setVertsFrom(vs); }
+  else { for(let i=0;i<n;i++){ verts[i].x=S.X[i]; verts[i].y=S.Y[i]; verts[i].z=S.Z[i]; } let tl=0; for(let i=0;i<n;i++) tl+=verts[i].distanceTo(verts[(i+1)%n]); L0=tl/n; updateGeomUnits(); }
+}
+function mspStep(){   // один шаг потока; false — Stir закончен
+  const S=_msp; if(!S || !_stir) return false;
+  const n=S.n; S.iters++;
+  const D=_mspDirection(S); S.contacts=_mspContacts(S, D);
+  let dm=0; for(let i=0;i<n;i++) dm=Math.max(dm, Math.hypot(D.dx[i],D.dy[i],D.dz[i]));
+  const scale=Math.max(S.R0, 1e-12), eps=1e-9*scale;
+  let ok=false, h=S.h, bt=0;
+  if(dm>1e-12*scale){
+    const QX=new Float64Array(n), QY=new Float64Array(n), QZ=new Float64Array(n);
+    for(; bt<_mspCfg.bt; bt++, h*=0.5){
+      for(let i=0;i<n;i++){ QX[i]=S.X[i]+h*D.dx[i]; QY[i]=S.Y[i]+h*D.dy[i]; QZ[i]=S.Z[i]+h*D.dz[i]; }
+      if(h*dm<1e-9*scale) break;
+      const t0=_mspNow(); S.failAdj=-1; S.failPair=null; const c=_mspCertify(S, [QX,QY,QZ], eps); S.certMs+=_mspNow()-t0;
+      if(c){ ok=true; break; }
+      if(bt===0){ const fp=S.failPair; let gap=-1; if(fp){ const o=new Float64Array(6), i=fp[0], j=fp[1], ip=(i+1)%n, jp=(j+1)%n; gap=_mspSegSeg(S.X[i],S.Y[i],S.Z[i], S.X[ip],S.Y[ip],S.Z[ip], S.X[j],S.Y[j],S.Z[j], S.X[jp],S.Y[jp],S.Z[jp], o); }
+        S.lastFail={adj:S.failAdj, pair:fp, gap_s:+(gap/Math.max(1e-300,sNominal())).toFixed(3), hd:+((h*dm)/Math.max(1e-300,sNominal())).toFixed(3)}; } }
+    if(ok){ let mv=0; for(let i=0;i<n;i++) mv=Math.max(mv, h*Math.hypot(D.dx[i],D.dy[i],D.dz[i])); S.moved+=mv; S.X.set(QX); S.Y.set(QY); S.Z.set(QZ); S.acc++; S.stall=0; S.h=Math.min(_mspCfg.step, h*2);   // шаг растёт обратно после удач
+      _mspSubdivide(S); _mspSync(S); recenter(); for(let i=0;i<S.n;i++){ S.X[i]=verts[i].x; S.Y[i]=verts[i].y; S.Z[i]=verts[i].z; }
+      if(S.acc%3===0 || S.acc<5) S.cross=_projCrossCount(verts); }
+  }
+  if(!ok){ S.rej++; S.stall++; S.h=_mspCfg.step; }
+  _stir.i=S.acc; _stir.disp=S.acc/_mspCfg.maxSteps; _stir.rejected=S.rej;
+  const Lr=N*L0, shrink=Lr/S.Lr0, ms=_mspNow()-S.t0;
+  if(bt>0 || S.acc%10===0 || !ok) S.hist.push({it:S.iters, acc:S.acc, h:+h.toPrecision(3), bt, n:S.n, cross:S.cross, shrink:+shrink.toFixed(3), g:+D.gnorm.toPrecision(3), amt:+D.amount.toFixed(3), c:S.contacts, ms:Math.round(ms), fail:S.lastFail||null});
+  if(S.cross===0){ S.why='unknotted'; }
+  else if(S.stall>=_mspCfg.stall){ S.why='stalled'; }
+  else if(S.acc>=_mspCfg.maxSteps){ S.why='steps'; }
+  else if(ms>_mspCfg.budgetMs){ S.why='time'; }
+  else if(shrink<_mspCfg.minShrink){ S.why='shrunk'; }
+  if(S.why){ mspFinish(); return false; }
+  return true;
+}
+function mspFinish(){   // подобие к исходной длине нити, ресэмплинг в N0 равных рёбер с сертификатом, затем общий stirFinish
+  const S=_msp; const n=N, n0=S.N0, Lr=n*L0, k=S.Lr0/Math.max(1e-300,Lr);
+  let cx=0,cy=0,cz=0; for(const v of verts){ cx+=v.x/n; cy+=v.y/n; cz+=v.z/n; }
+  for(const v of verts){ v.x=cx+(v.x-cx)*k; v.y=cy+(v.y-cy)*k; v.z=cz+(v.z-cz)*k; }   // подобие — изотопия; длина нити снова N0·L00
+  L0=Lr*k/n; updateGeomUnits();
+  const fine=[]; for(let i=0;i<n;i++){ const a=verts[i], b=verts[(i+1)%n]; for(let q=0;q<STIR_SUB;q++){ const t=q/STIR_SUB; fine.push([a.x+t*(b.x-a.x), a.y+t*(b.y-a.y), a.z+t*(b.z-a.z)]); } }
+  const M=fine.length, cum=new Float64Array(M+1); for(let q=0;q<M;q++){ const a=fine[q], b=fine[(q+1)%M]; cum[q+1]=cum[q]+Math.hypot(b[0]-a[0],b[1]-a[1],b[2]-a[2]); } const T=cum[M];
+  let res='none'; const resDbg=[];
+  const dmaxOf=(Y)=>{ const nn=Y.length; let dmax=0, j=0; for(let k=0;k<M;k++){ const sv=cum[k]; while(j<nn-1 && T*(j+1)/nn<=sv) j++; const a=Y[j], b=Y[(j+1)%nn], u=(sv-T*j/nn)/(T/nn);
+      const d=Math.hypot(fine[k][0]-(a[0]+u*(b[0]-a[0])), fine[k][1]-(a[1]+u*(b[1]-a[1])), fine[k][2]-(a[2]+u*(b[2]-a[2]))); if(d>dmax) dmax=d; } return dmax; };
+  const tryY=(Y, tag)=>{ if(res!=='none') return; const c=(T>1e-12 && stirResampleCert(fine, cum, T, Y)); resDbg.push({tag, cert:c, dmax_L0:+(dmaxOf(Y)/S.L00).toFixed(4), gmin_s:+(minSegGapRep()/Math.max(1e-300,sNominal())).toFixed(3)}); if(c){ _stirSetVerts(Y.map(y=>new THREE.Vector3(y[0],y[1],y[2])), S.L00); projectLengthsSafe(40); res=tag; } };
+  { const Y=[]; let j=0; for(let q=0;q<n0;q++){ const sv=T*q/n0; while(j<M-1 && cum[j+1]<=sv) j++; const a=fine[j], b=fine[(j+1)%M], u=(sv-cum[j])/Math.max(1e-300,cum[j+1]-cum[j]); Y.push([a[0]+u*(b[0]-a[0]), a[1]+u*(b[1]-a[1]), a[2]+u*(b[2]-a[2])]); } tryY(Y,'arc'); }   // равные дуги самой ломаной
+  if(res==='none'){ const curve=new THREE.CatmullRomCurve3(verts, true, 'centripetal', 0.5); curve.arcLengthDivisions=Math.max(800, 4*n0); const pts=curve.getSpacedPoints(n0), Y=[]; for(let j=0;j<n0;j++) Y.push([pts[j].x, pts[j].y, pts[j].z]); tryY(Y,'spline'); }
+  if(res==='none'){ L0=S.Lr0/n; updateGeomUnits(); projectLengthsSafe(40); if(n!==n0) _stirN0=n0; }   // ресэмплинг не сертифицирован (крутые изгибы без изгибной жёсткости): рёбра выравниваются на месте (капы по зазорам — изотопия), серия идёт при N′, фаза 3 вернёт N0
+  recenter(); rebuildTube();
+  _stir.msp={why:S.why, acc:S.acc, rej:S.rej, iters:S.iters, n0:S.N0, n1:n, cross0:S.cross0, cross1:S.cross, shrink:+(Lr/S.Lr0).toFixed(3), moved_R:+(S.moved/Math.max(1e-12,S.R0)).toFixed(2), resample:res, resDbg, rho_s:_mspCfg.rho, cgIt:S.cgIt, ms:Math.round(_mspNow()-S.t0), sphMs:Math.round(S.sphMs), cgMs:Math.round(S.cgMs), certMs:Math.round(S.certMs), sub:S.sub, sat:S.sat, lip:S.lip, hist:S.hist};
+  _stir.disp=_stir.target; _msp=null;
+  stirFinish();
+}
 function stirRefield(){ if(_stir && _stir.mode==='open') stirFieldContacts(); else stirField(); }
 function stirStart(){
   if(running || _stir || !verts.length) return false;
@@ -3411,9 +3672,10 @@ function stirStart(){
     const d0=_detRobust(3);
     _stirS0={verts:verts.map(v=>v.clone()), N, L0, det:(d0!==null? d0 : _runDet), s:sNominal()}; _stirN0=N;   // ядро — один раз (в воркере _thickFit другой); N0 — к нему возвращает фаза 3
     if(!same){ _stirHoles=[]; _stirSeed=1+Math.floor(Math.random()*1e6); } }
-  { const el=document.getElementById('stirMode'); if(el && (el.value==='loops'||el.value==='invert'||el.value==='open')) STIR_MODE=el.value; }   // пустой мок стенда режим не перекрывает
-  _stir.mode='remap?'; _stir.rej=[]; setStatus(STIR_MODE==='loops'? 'stirring… pulling loops out' : STIR_MODE==='open'? 'stirring… opening tight contacts' : 'stirring… turning inside out');
+  { const el=document.getElementById('stirMode'); if(el && (el.value==='loops'||el.value==='invert'||el.value==='open'||el.value==='msp')) STIR_MODE=el.value; }   // пустой мок стенда режим не перекрывает
+  _stir.mode='remap?'; _stir.rej=[]; setStatus(STIR_MODE==='msp'? 'stirring… medial sphere flow' : STIR_MODE==='loops'? 'stirring… pulling loops out' : STIR_MODE==='open'? 'stirring… opening tight contacts' : 'stirring… turning inside out');
   const run=()=>{ if(!_stir) return;
+    if(STIR_MODE==='msp'){ _stirS0=null; _stirHoles=[]; _stirN0=0; _stir.mode='msp'; mspInit(); setStatus(stirStatus()); return; }   // 7.0: поток медиальных сфер, шаг за шагом в stirStep
     if(STIR_MODE==='open'){ _stirS0=null; _stirHoles=[]; _stirN0=0; _stir.mode='open'; stirFieldContacts(); setStatus(stirStatus()); return; }   // разжатие контактов: итеративное, как растаскивание
     let rm=null; for(let t=0; t<STIR_REMAP_TRIES && !rm; t++){ rm=stirRemapOnce(_stirSeed++); if(!rm){ _stir.rej.push(_stirLastRej); if(_stirTerminal(_stirLastRej)) break; } }
     if(rm){ _stir.mode=STIR_MODE; _stir.remap=rm; _stir.disp=rm.disp; _stir.i=1; stirFinish(); return; }
@@ -3428,10 +3690,11 @@ function stirStart(){
   return true;
 }
 function stirPct(){ return _stir? Math.min(99, Math.round(100*Math.max(_stir.disp/Math.max(1e-12,_stir.target), _stir.i/_stir.n))) : 0; }
-function stirStatus(){ return 'stirring… '+(_stir&&_stir.mode==='open'? 'opening tight contacts' : 'pulling parts apart')+' ('+stirPct()+'%)'; }
+function stirStatus(){ if(_stir&&_stir.mode==='msp'&&_msp) return 'stirring… medial sphere flow: '+_msp.acc+' steps, N '+N+', crossings '+_msp.cross0+' → '+_msp.cross+' ('+stirPct()+'%)'; return 'stirring… '+(_stir&&_stir.mode==='open'? 'opening tight contacts' : 'pulling parts apart')+' ('+stirPct()+'%)'; }
 function stirStep(){
   if(!_stir) return false;
   if(_stir.mode==='remap?') return true;                          // ремап ещё не выполнен (отложен на кадр)
+  if(_stir.mode==='msp') return mspStep();                       // 7.0
   const n=N; _closeCollect=[]; _closeThr=sExcl()+2.5*L0; _segGap=new Float64Array(n).fill(Infinity); _segGapRep=new Float64Array(n).fill(Infinity);   // контакты: все пары, способные войти в ядро за шаг (2 капа + запас)
   const g0=energyGrad(true, true), gm0=g0.gmin;                 // сила ТОЛЬКО отталкивания — помогает раздвинуть контакты
   const close=_closeCollect, segGap=_segGap, segRep=_segGapRep; _closeCollect=null; _segGap=null; _segGapRep=null;
@@ -3496,10 +3759,10 @@ function stirFinish(){
   const st=_stir; _stir=null; _stirX0=null;
   const play=document.getElementById('play'); if(play) play.disabled=false;
   _inflate=1; _energyDirty=true; _ePrev=-1;    // ядро — к номиналу (зазоры теперь шире него)
-  if(st.mode==='invert' || st.mode==='loops'){ rebuildTube(); fitCamera(true); }   // новая форма видна сразу, до первого снимка серии
+  if(st.mode==='invert' || st.mode==='loops' || st.mode==='msp'){ rebuildTube(); fitCamera(true); }   // новая форма видна сразу, до первого снимка серии
   const R1=knotRadius(), dEnd=_detRobust(3), grow=R1/Math.max(1e-9,st.R0), dispR=st.disp/Math.max(1e-9,st.R0);
   const warn=(dEnd!==null && st.det>0 && dEnd!==st.det) ? '⚠ knot type changed by stir (det '+st.det+' → '+dEnd+') · ' : '';
-  _dbgStir={mode:st.mode, remap:st.remap||null, rej:st.rej||[], steps:st.i, rejected:st.rejected, rejB:st.rejB, rejInf:st.rejInf, rejLoc:st.rejLoc, fields:st.fields, moved_L0:+(st.moved/L0).toFixed(2), disp_R:+dispR.toFixed(2), disp_L0:+(st.disp/L0).toFixed(2), grow:+grow.toFixed(3), gminMin_s:+(st.gminMin/Math.max(1e-12,st.s)).toFixed(3), det0:st.det, det1:dEnd, tooTight:false};
+  _dbgStir={mode:st.mode, remap:st.remap||null, rej:st.rej||[], steps:st.i, rejected:st.rejected, rejB:st.rejB, rejInf:st.rejInf, rejLoc:st.rejLoc, fields:st.fields, moved_L0:+(st.moved/L0).toFixed(2), disp_R:+dispR.toFixed(2), disp_L0:+(st.disp/L0).toFixed(2), grow:+grow.toFixed(3), gminMin_s:+(st.gminMin/Math.max(1e-12,st.s)).toFixed(3), det0:st.det, det1:dEnd, tooTight:false, msp:st.msp||null};
   if((st.mode==='pull'||st.mode==='open') && st.disp<0.5*L0){    // только растаскивание: узел слишком плотный, части не сдвинулись — серию не запускаем
     _dbgStir.tooTight=true; stirEnable(true);
     const pill=document.getElementById('statusPill'); if(pill && pill.classList){ pill.classList.remove('run'); pill.classList.add('done'); }
@@ -3509,7 +3772,7 @@ function stirFinish(){
   _fromLift=true; _liftFromDiagram=false;        // разрыхлённая форма — лифт новой серии попыток (без перестройки из диаграммы)
   _annWavesOn=true; if(typeof crossings!=='undefined' && crossings.length) _annNC=crossings.length;   // 4.16: серия после Stir — с волнами
   startPhysics();
-  _stirWarn=warn; _stirNote = st.mode==='open' ? ' · stirred (contacts opened '+dispR.toFixed(1)+'·R)' : st.mode==='loops' ? ' · stirred ('+((st.remap&&st.remap.loops)? st.remap.loops.length : 0)+' loops out)' : st.mode==='invert' ? ' · stirred (inside out)' : ' · stirred (parts moved '+dispR.toFixed(1)+'·R'+(st.rej&&st.rej.length? '; remap rejected: '+st.rej.join(',') : '')+')';   // пометки на всю серию (startPhysics уже отработал)
+  _stirWarn=warn; _stirNote = st.mode==='msp' ? ' · stirred (medial sphere flow: '+(st.msp? st.msp.acc+' steps, crossings '+st.msp.cross0+' → '+st.msp.cross1+(st.msp.why==='unknotted'? ', unknotted' : '') : '')+')' : st.mode==='open' ? ' · stirred (contacts opened '+dispR.toFixed(1)+'·R)' : st.mode==='loops' ? ' · stirred ('+((st.remap&&st.remap.loops)? st.remap.loops.length : 0)+' loops out)' : st.mode==='invert' ? ' · stirred (inside out)' : ' · stirred (parts moved '+dispR.toFixed(1)+'·R'+(st.rej&&st.rej.length? '; remap rejected: '+st.rej.join(',') : '')+')';   // пометки на всю серию (startPhysics уже отработал)
   _msStretchMild=true;
   if(runLog && _stirEv.length){ runLog.events=_stirEv.map(e=>({...e, st:0})); } _stirEv=[];
   setStatus(runStatus());
@@ -3559,7 +3822,7 @@ function parBest(P){   // лучший среди готовых результ�
 }
 function stirDeflateLive(){ updateGeomUnits(); const g=minSegGapRep(), sN=sNominal(); if(!(g>1.02*sN)) _inflate=Math.min(_inflate, Math.max(1e-4, g/(1.3*sN))); if(_stir) _stir.s=sN; }
 window.__knotStir=(k)=>{ if(!_stir && !stirStart()) return {started:false, running}; if(_stirPending){ const f=_stirPending; _stirPending=null; f(); } let c=0; while(_stir && c<(k||STIR_STEPS)){ stirStep(); c++; } return {stir:!!_stir, i:_stir?_stir.i:null, running, dbg:_dbgStir}; };
-window.__stirMode=(m)=>{ if(m==='loops'||m==='invert'||m==='open'){ STIR_MODE=m; const el=document.getElementById('stirMode'); if(el) el.value=m; } return STIR_MODE; };   // стенд: режим Stir до __knotStir
+window.__stirMode=(m)=>{ if(m==='loops'||m==='invert'||m==='open'||m==='msp'){ STIR_MODE=m; const el=document.getElementById('stirMode'); if(el) el.value=m; } return STIR_MODE; };   // стенд: режим Stir до __knotStir
 window.__stirPin=(b)=>{ if(b!==undefined) STIR_PIN=!!b; return STIR_PIN; };   // стенд: пины до __knotStir (false — веер без фаз); в UI переключателя нет (2.40: пины всегда)
 function relaxStep(){
   if(!running || !verts.length) return;
@@ -5161,7 +5424,7 @@ document.getElementById('play').onclick=()=>{
   const rd=()=>{ const v=Math.round(+el.value); if(v>=1 && v<=20) MULTI_START=v; };
   const fix=()=>{ let v=Math.round(+el.value); if(!(v>=1)) v=MULTI_START; v=Math.max(1, Math.min(20, v)); el.value=String(v); MULTI_START=v; };
   if(el){ el.oninput=rd; el.onchange=fix; rd(); } }
-{ const el=document.getElementById('stirMode'); if(el){ el.value=STIR_MODE; el.onchange=()=>{ if(el.value==='loops'||el.value==='invert'||el.value==='inflate') STIR_MODE=el.value; }; } }
+{ const el=document.getElementById('stirMode'); if(el){ el.value=STIR_MODE; el.onchange=()=>{ if(el.value==='loops'||el.value==='invert'||el.value==='open'||el.value==='msp') STIR_MODE=el.value; }; } }
 
 const bendCoefEl=document.getElementById('bendCoef'), repCoefEl=document.getElementById('repCoef');
 const thick=document.getElementById('thick');
@@ -5432,7 +5695,7 @@ window.__knotSetVerts=(arr)=>{ if(!arr||arr.length<8) return false; _liftFromDia
   N=verts.length; allocBuffers(); resampleEqualArc(); recenter();
   rebuildTube(); fitCamera(false); return {N,L0:+L0.toFixed(5)}; };
 // ВЕРСИЯ ИНТЕРФЕЙСА: X задаёт пользователь, Y растёт на 1 с каждой новой сборкой
-const APP_VER_MAJOR=4, APP_VER_MINOR=20;   // 4.14 (2026-09-20): импорт картинки с тонкими штрихами: если на рабочем размере (≤ 1000 px) кривая не сошлась (не замкнута, одинокие концы, несколько кусков), распознавание повторяется на полном размере (≤ 1600, как отдаёт ikLoadFile) и берётся лучший результат; потолок дальнего моста 3.5·medL; замыкание «open ends joined» — нижняя прядь под сплошными штрихами (пересечения известны, без белых кружков)   // 4.13 (2026-09-20): Repel ×2 — ползунок 1–10, физическое r = 2×ползунок, старт 5 (= прежние 10); импорт плотной диаграммы: ложные «разрывы пера» между концами РАЗНЫХ нижних прядей отсеиваются проверкой коллинеарности, плюс глобальное условие «одна замкнутая кривая» (_ikMergeCycles) — узел Хакена с картинки импортируется точно: 141 пересечение, det 1   // 4.12 (2026-09-20): кольца пересечений не слипаются: свыше 150 пересечений Random строит сетку вдвое плотнее (шаг 0.75 радиуса маркера, до 50×50), кольца и верёвочка мельчают по тесноте не более чем вдвое — каждое кольцо по своему соседу, верёвочка по медиане; клик и курсор берут ближайшее кольцо; волнистая кривая — запасной путь для низких окон с честным статусом   // 4.11 (2026-09-20): Random до 500 пересечений — выше 150 диаграмма строится волнистой кривой (сумма случайных гармоник), сетка столько на холст не вмещает   // 4.10 (2026-09-19): Stir «раздутие ×k» убран — замер показал, что за все 2100 шагов его расписания форма не меняется (радиус инерции 0.03 %, отпечаток формы 0.1 %): длина нити закреплена, энергия изгиба от масштаба не зависит, поэтому сжатие ядра просто выключало единственную силу, способную раздвинуть пряди. Вместо него Stir = разжатие тугих контактов: пары прядей с наименьшим зазором толкаются врозь колоколом вдоль нити, с прежними капами и сертификатами   // 4.9 (2026-09-19): жёсткость верёвочки под рукой зафиксирована на 8, ползунок Rigid. убран из панели 2D (пользователь выбрал значение и попросил убрать орган управления)   // 4.8 (2026-09-19): перетаскивание переписано как чистая геометрическая деформация: smooth[k] = base[k] + (курсор − точка захвата)·w[k], где w — колокол Гаусса по длине дуги от точки захвата, посчитанный один раз при захвате. Сумма гладких функций гладкая — ни острого угла у руки, ни «гармошки»; форма зависит только от положения курсора, а не от числа событий мыши   // 4.7 (2026-09-18): нижняя прядь у пересечения обрывается РОВНО и ВДОЛЬ верхней (круглый торец читался как обрубленная нитка): концевой участок куска плавно, кубикой, сводится к нормали верхней пряди, а ровный торец строится перпендикулярно последнему отрезку — то есть параллельно верхней пряди при любом угле пересечения   // 4.6 (2026-09-18): контактная отметина на срезе нижней пряди убрана (source-atop клал её и на тень верёвочки на бумаге — вдвое более широкую, и вместо тени выходил серый прямоугольник поперёк); перетаскивание: вязкость не действует там, где держит рука (точка обгоняла мышку, закрепление возвращало её — верёвочка ломалась углом ровно под рукой), на отпускании форма больше не меняется (ни «успокоения», ни пересборки сплайном — не было бы рывка), жёсткость по умолчанию 7   // 4.5 (2026-09-18): верёвочка в 2D без «чешуи» и швов — разрыв у пересечения не выстригается из готового рисунка, а РЕЖЕТСЯ сама кривая: каждый кусок рисуется ровно один раз (дважды положенные полупрозрачные слои давали чешую, ровные торцы дорисовки — тёмные волоски); рука тянет узел колоколом Гаусса (под рукой ход равен ходу мышки, вдали почти ноль) с ползунком жёсткости Rigid. 1–10   // 4.4 (2026-09-18): разрыв и кольцо у пересечения стали мелкими — «кто сверху» держится на тени верхней пряди; замкнутая диаграмма сразу в режиме редактирования: курсор-ладошка, узел берут рукой и тянут как верёвку (нерастяжимо, с упругостью и вязкостью), пересечения и выбранные проходы едут следом   // 4.3 (2026-09-18): верёвочка без «чешуи» — блик и притенение смещаются по НОРМАЛИ к кривой со стороны света, а не в одну сторону экрана; контактная тень — короткая отметина с затуханием на срезе нижней пряди, а не полоса вдоль всей верхней (она мазала соседние пряди тёмными штрихами); свивка убрана   // 4.2 (2026-09-18): картинку можно бросить прямо в поле 2D (кнопка Image переименована в Upload); линия в 2D — тонкая верёвочка: тень на бумаге, тёмная оплётка, светотень и блик, редкая свивка; пересечение режется ВДОЛЬ верхней пряди, и она кладёт контактную тень на срезы нижней   // 4.1 (2026-09-18): второй уровень порога включается только тогда, когда маска первого уровня не похожа на рисунок линией (мало чернил, короткая суммарная линия) — на фото с неровной чернильностью штриха бледные участки больше не теряются; зерно убирается медианой 3×3, а не средним (среднее затягивало узкие разрывы)   // 4.0 (2026-09-15): распознавание скетчей на бумаге — порог по второму уровню Оцу (у штриха есть тёмное ядро, у клетки, зерна и пятен нет), фон без сдвига у края кадра (рамка в морфологии, зеркало в сглаживании), чернильность по сглаженному 3×3 кадру, «упор» нижней пряди — по настоящему разрыву в маске, слияние вытянутого X при любом угле, мост длиннее привычного разрыва запрещён   // 3.9 (2026-09-15): пересечения картинки без видимого разрыва — белые кружки (проход не выбран), Physics недоступна до выбора всех; кнопка Stir — как Physics, но синяя   // 3.8 (2026-09-15): распознавание рисунка пером с двойным следом — «линза» и параллельная шпора в скелете, стык разрывов пера, без «ослабленных» мостов через весь рисунок, строгий второй проход для оставшихся концов   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
+const APP_VER_MAJOR=7, APP_VER_MINOR=0;   // 7.0 (2026-09-29): Stir = поток медиальных сфер (MSP, Noma–Singh–Jacobson) по документу пользователя CONTINUOUS_3D_ALGORITHM.md: укорочение кривой + притяжение в свободное пространство (K лучей, пустые шары), согласованное движение d=−(L+βC+D+μM)⁻¹g, контактная проекция Хилдрета, ТОЧНЫЙ сертификат всей линейной траектории (разделяющая ось на интервале τ с бисекцией; липшицев предтест), деление длинных рёбер; в конце подобие к исходной длине нити и ресэмплинг в N0 рёбер, затем серия с волнами 4.20   // 4.14 (2026-09-20): импорт картинки с тонкими штрихами: если на рабочем размере (≤ 1000 px) кривая не сошлась (не замкнута, одинокие концы, несколько кусков), распознавание повторяется на полном размере (≤ 1600, как отдаёт ikLoadFile) и берётся лучший результат; потолок дальнего моста 3.5·medL; замыкание «open ends joined» — нижняя прядь под сплошными штрихами (пересечения известны, без белых кружков)   // 4.13 (2026-09-20): Repel ×2 — ползунок 1–10, физическое r = 2×ползунок, старт 5 (= прежние 10); импорт плотной диаграммы: ложные «разрывы пера» между концами РАЗНЫХ нижних прядей отсеиваются проверкой коллинеарности, плюс глобальное условие «одна замкнутая кривая» (_ikMergeCycles) — узел Хакена с картинки импортируется точно: 141 пересечение, det 1   // 4.12 (2026-09-20): кольца пересечений не слипаются: свыше 150 пересечений Random строит сетку вдвое плотнее (шаг 0.75 радиуса маркера, до 50×50), кольца и верёвочка мельчают по тесноте не более чем вдвое — каждое кольцо по своему соседу, верёвочка по медиане; клик и курсор берут ближайшее кольцо; волнистая кривая — запасной путь для низких окон с честным статусом   // 4.11 (2026-09-20): Random до 500 пересечений — выше 150 диаграмма строится волнистой кривой (сумма случайных гармоник), сетка столько на холст не вмещает   // 4.10 (2026-09-19): Stir «раздутие ×k» убран — замер показал, что за все 2100 шагов его расписания форма не меняется (радиус инерции 0.03 %, отпечаток формы 0.1 %): длина нити закреплена, энергия изгиба от масштаба не зависит, поэтому сжатие ядра просто выключало единственную силу, способную раздвинуть пряди. Вместо него Stir = разжатие тугих контактов: пары прядей с наименьшим зазором толкаются врозь колоколом вдоль нити, с прежними капами и сертификатами   // 4.9 (2026-09-19): жёсткость верёвочки под рукой зафиксирована на 8, ползунок Rigid. убран из панели 2D (пользователь выбрал значение и попросил убрать орган управления)   // 4.8 (2026-09-19): перетаскивание переписано как чистая геометрическая деформация: smooth[k] = base[k] + (курсор − точка захвата)·w[k], где w — колокол Гаусса по длине дуги от точки захвата, посчитанный один раз при захвате. Сумма гладких функций гладкая — ни острого угла у руки, ни «гармошки»; форма зависит только от положения курсора, а не от числа событий мыши   // 4.7 (2026-09-18): нижняя прядь у пересечения обрывается РОВНО и ВДОЛЬ верхней (круглый торец читался как обрубленная нитка): концевой участок куска плавно, кубикой, сводится к нормали верхней пряди, а ровный торец строится перпендикулярно последнему отрезку — то есть параллельно верхней пряди при любом угле пересечения   // 4.6 (2026-09-18): контактная отметина на срезе нижней пряди убрана (source-atop клал её и на тень верёвочки на бумаге — вдвое более широкую, и вместо тени выходил серый прямоугольник поперёк); перетаскивание: вязкость не действует там, где держит рука (точка обгоняла мышку, закрепление возвращало её — верёвочка ломалась углом ровно под рукой), на отпускании форма больше не меняется (ни «успокоения», ни пересборки сплайном — не было бы рывка), жёсткость по умолчанию 7   // 4.5 (2026-09-18): верёвочка в 2D без «чешуи» и швов — разрыв у пересечения не выстригается из готового рисунка, а РЕЖЕТСЯ сама кривая: каждый кусок рисуется ровно один раз (дважды положенные полупрозрачные слои давали чешую, ровные торцы дорисовки — тёмные волоски); рука тянет узел колоколом Гаусса (под рукой ход равен ходу мышки, вдали почти ноль) с ползунком жёсткости Rigid. 1–10   // 4.4 (2026-09-18): разрыв и кольцо у пересечения стали мелкими — «кто сверху» держится на тени верхней пряди; замкнутая диаграмма сразу в режиме редактирования: курсор-ладошка, узел берут рукой и тянут как верёвку (нерастяжимо, с упругостью и вязкостью), пересечения и выбранные проходы едут следом   // 4.3 (2026-09-18): верёвочка без «чешуи» — блик и притенение смещаются по НОРМАЛИ к кривой со стороны света, а не в одну сторону экрана; контактная тень — короткая отметина с затуханием на срезе нижней пряди, а не полоса вдоль всей верхней (она мазала соседние пряди тёмными штрихами); свивка убрана   // 4.2 (2026-09-18): картинку можно бросить прямо в поле 2D (кнопка Image переименована в Upload); линия в 2D — тонкая верёвочка: тень на бумаге, тёмная оплётка, светотень и блик, редкая свивка; пересечение режется ВДОЛЬ верхней пряди, и она кладёт контактную тень на срезы нижней   // 4.1 (2026-09-18): второй уровень порога включается только тогда, когда маска первого уровня не похожа на рисунок линией (мало чернил, короткая суммарная линия) — на фото с неровной чернильностью штриха бледные участки больше не теряются; зерно убирается медианой 3×3, а не средним (среднее затягивало узкие разрывы)   // 4.0 (2026-09-15): распознавание скетчей на бумаге — порог по второму уровню Оцу (у штриха есть тёмное ядро, у клетки, зерна и пятен нет), фон без сдвига у края кадра (рамка в морфологии, зеркало в сглаживании), чернильность по сглаженному 3×3 кадру, «упор» нижней пряди — по настоящему разрыву в маске, слияние вытянутого X при любом угле, мост длиннее привычного разрыва запрещён   // 3.9 (2026-09-15): пересечения картинки без видимого разрыва — белые кружки (проход не выбран), Physics недоступна до выбора всех; кнопка Stir — как Physics, но синяя   // 3.8 (2026-09-15): распознавание рисунка пером с двойным следом — «линза» и параллельная шпора в скелете, стык разрывов пера, без «ослабленных» мостов через весь рисунок, строгий второй проход для оставшихся концов   // 3.7 (2026-09-15): рекорд серии «липкий» — попытка с той же в показанных цифрах энергией рекорд не отбирает, зелёная рамка не перескакивает (betterRes, msMarkBest, parBest)   // 3.6 (2026-09-15): загруженная картинка не рисуется под диаграммой (подложка убрана: пятна и контуры штрихов фото в скетч узла не переносятся)   // 3.5 (2026-09-14): узел по фото — фон морфологическим закрытием/открытием на половинном разрешении (виньетка, тени, клетка тетради), полярность по толщине масок, гистерезис ≤2 px, удаление далёких соринок; ошибки — в стандартном окне сообщений (showError, репортёр)   // 3.4 (2026-09-14): узел по картинке — кнопка Image, перетаскивание и вставка; распознавание диаграммы (скелет, разрывы нижних прядей = над/под, X без разрыва — чередование), подложка-источник в 2D   // 3.3 (2026-09-14): рамки окон попыток — один жирный контур по краю окна (светлый — показанное, зелёный — лучшее, оба — зелёный сразу внутри светлого), заголовок окна 32px; чистка папки проекта (stir.html и лаборатория Stir удалены — в истории git, d31965b)   // 3.2 (2026-09-14): ядро пар energyGrad в WebAssembly (арена памяти, воркеры, JS-путь запасной — бит-в-бит)   // 3.1 (2026-09-14): Stir = раздутие ×k, лимит 250 пересечений, автотолщина, разделитель панелей, компактные органы управления, рамки окон   // 3.0 (2026-09-14): быстрое ядро (Верле, плоские массивы, Δc=3s), Stir «петли наружу» (веер + закрепления, фазы 1–3, N′), окна попыток (shown/best · Min, выбор кликом), без автопересчёта   // 2.39: fast-ядро релаксации (список Верле, плоское ядро расстояний, кэш прогонки, сканы зазоров по сетке) и TAIL_CUT=3; 2.40: Stir «петли наружу» (веер + пины, фазы 1–3, N′) из stir.html
 const APP_VERSION=APP_VER_MAJOR+'.'+APP_VER_MINOR;   // 3.0, 3.1, … (с 3.0 без дополнения нулём)
 window.__buildTag='v'+APP_VERSION;
 { const el=document.getElementById('appVer'); if(el) el.textContent=APP_VERSION; }
