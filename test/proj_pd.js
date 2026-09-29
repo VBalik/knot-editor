@@ -28,12 +28,21 @@ function project(vs, B){   // vs — [{x,y,z}] или [[x,y,z]]
       cr.push({sA:i+t, sB:j+u, over: zi>zj?'A':'B', x:ax+bx*t, y:ay+by*t, dirA:[bx,by], dirB:[dx,dy]}); } }
   return {cr, pd:pdFromCross(cr), n:cr.length};
 }
+let _regina=null;   // есть ли Regina (python3 + regina): проверяется один раз; SIMP_JS=1 — принудительно rmoves.js
+function reginaOk(){ if(_regina!==null) return _regina; if(process.env.SIMP_JS==='1'){ _regina=false; return false; }
+  try{ const r=require('child_process').spawnSync('python3',['-c','import regina'],{cwd:__dirname, timeout:60000}); _regina=(r.status===0); }catch(e){ _regina=false; } return _regina; }
 function simpNC(vs, dirs, r3Budget){   // наименьшее число пересечений после simplify по dirs (по умолчанию 8) направлениям; null — ни одна проекция не годится
+  // оракул — Regina simplify() (regsimp.py), если доступна; иначе rmoves.js (на больших диаграммах изредка упрощает до 0 ложно — см. PROMPT-v2.md 7.0)
   let best=Infinity, sd=11, raw=Infinity; const rnd=()=>{ sd=(Math.imul(sd,1103515245)+12345)&0x7fffffff; return sd/0x80000000; };
+  const pds=[];
   for(let t=0;t<(dirs||8);t++){ let d=[rnd()-0.5,rnd()-0.5,rnd()-0.5]; const l=Math.hypot(d[0],d[1],d[2])||1; d=[d[0]/l,d[1]/l,d[2]/l];
     const P=project(vs, basis(d)); if(!P) continue; raw=Math.min(raw, P.n); if(P.n===0){ best=0; continue; }
     let L; try{ L=new RMoves.Link(P.pd); if(!L.valid()) continue; }catch(e){ continue; }
+    if(reginaOk()){ pds.push(P.pd); continue; }
     const r=L.clone().simplify({r3Budget:r3Budget||300, rnd}); best=Math.min(best, r.best.size()); }
-  return {simp: isFinite(best)? best : null, raw: isFinite(raw)? raw : null};
+  let oracle='js';
+  if(pds.length){ oracle='regina'; try{ const r=require('child_process').spawnSync('python3',['regsimp.py'],{cwd:__dirname, input:JSON.stringify(pds), timeout:600000, maxBuffer:1<<26});
+      const sizes=JSON.parse(String(r.stdout)); for(const z of sizes) if(z>=0) best=Math.min(best, z); }catch(e){ oracle='regina-failed'; } }
+  return {simp: isFinite(best)? best : null, raw: isFinite(raw)? raw : null, oracle};
 }
 module.exports={basis, project, pdFromCross, simpNC, RMoves};

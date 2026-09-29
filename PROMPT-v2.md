@@ -1937,8 +1937,13 @@ stir8 — выворачивание, corners, jamwhy, thinfit, wsyntax) зел�
   Параметры — `window.__mspCfg({...})` (стенд `MSP_CFG`): `rho`, `K`, `beta`=0.01, `mu`=16, `step`=1, `cut`=1, `sep`=0,
   `depth`=12, `maxSteps`, `stall`, `budgetMs`, `split`=2, `nmax`=2, `minShrink`.
 - **Стенд:** `test/msp.js` (перенос `moves.js` 5.x: `HK_FILE`/`KNOT`, `SP_START`/`SP_SAVE`, `SP_ONLY`, `SP_MODE=msp|open`,
-  `MSP_CFG`, `SP_SEED`, `SP_PROJ`), `test/proj_pd.js` — сложность формы `simp` (проекция → PD → упрощение ходами
-  Рейдемейстера `rmoves.js` из 5.0, минимум по 8 направлениям), `test/rmoves.js` скопирован из `v5`.
+  `MSP_CFG`, `SP_SEED`, `SP_PROJ`, `SP_SAVE_STIR`), `test/proj_pd.js` — сложность формы `simp` (проекция → PD →
+  упрощение, минимум по 8 направлениям; упрощает **Regina** через `regsimp.py`, если она есть в python3, иначе
+  `rmoves.js` из 5.0), `test/shapepd.js` + `test/mspcheck.py` — оракул Regina для сохранённой формы.
+  **Находка стенда:** `rmoves.js` на больших диаграммах (238 пересечений, проекция формы после MSP) один раз «упростил»
+  диаграмму до 0 пересечений, а Regina на том же PD даёт 108 — ложное распутывание движка ходов (в 5.x он проверялся
+  на диаграммах до ~150 пересечений). Поэтому метрика теперь считается Regina; `SIMP_JS=1` возвращает движок JS.
+  Ошибка в `rmoves.js` не исправлена (он не в программе, только в стенде).
 
 ## Проект и публикация
 
