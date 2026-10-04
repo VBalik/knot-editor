@@ -30,7 +30,7 @@
 | `battery.js` | пресеты узлов сходятся, тип (det) сохраняется |
 | `uiwins.js`, `uisel.js`, `besttie.js` | окна попыток, выбор кликом, «липкий» рекорд |
 | `stir8.js` | Stir (в `exp` — S «бегущая грыжа», в `v3` — разжатие тугих контактов) сохраняет тип узла; многофазный S крутится до конца |
-| `hernia.js` | **алгоритм S «бегущая грыжа» (4.21-exp)** и конвейер S→P: `KNOT=…`/`HK_FILE=…`/`SP_START=<json>`, `SP_ONLY=1` — только S, `UK_STIR`, `HERN_CFG='{json}'` (size, passes, dr, ds, f, tol, patience, maxMul, trace), `SP_SEED`; в `stirs[].hern` — steps/held/shrinks, gone/travel, budgetOut, rMean_R, penVMax_L0, moved_R, ms |
+| `hernia.js` | **алгоритм S «бегущая грыжа» (4.21-exp)** и конвейер S→P: `KNOT=…`/`HK_FILE=…`/`SP_START=<json>`, `SP_ONLY=1` — только S, `UK_STIR`, `HERN_CFG='{json}'` (size, passes, dr, ds, f, tol, patience, maxMul, trace; 4.24-exp: balls, randDir, speed, waves), `SP_SEED`; в `stirs[].hern` — steps/held/shrinks, gone/travel, budgetOut, rMean_R, penVMax_L0, moved_R, ms |
 | `pending.js` | белые кружки у невыбранных проходов, блокировка Physics |
 | `imgknot.js` | распознавание синтетических картинок, 10 стилей (`IK_STYLES=clean,graph IK_N=5,12,26 IK_SEEDS=1` — быстрый прогон); ожидание при `IK_SEEDS=3`: 22/22 во всех десяти стилях |
 | `imgphoto.js` | картинка с диска: `IK_IMG=<файл .jpg/.png> IK_EXPECT=<пересечений>,<det>` |
