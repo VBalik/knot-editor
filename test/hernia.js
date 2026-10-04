@@ -55,7 +55,7 @@
   if(process.env.SP_SAVE){ fs.mkdirSync(path.dirname(process.env.SP_SAVE),{recursive:true}); fs.writeFileSync(process.env.SP_SAVE, JSON.stringify({name:out.name, N, verts:verts.map(v=>[+v.x.toFixed(5),+v.y.toFixed(5),+v.z.toFixed(5)])})); out.saved=process.env.SP_SAVE; }
   if(process.env.HERN_CFG) out.hernCfg=window.__hernCfg(JSON.parse(process.env.HERN_CFG));
   if(process.env.SW_CFG) out.swCfg=window.__swCfg(JSON.parse(process.env.SW_CFG));   // 4.25-exp: волны жёсткости (SP_MODE=swave)
-  const MODE=process.env.SP_MODE||'hernia'; window.__stirMode(MODE); out.stirMode=STIR_MODE; H.set({ms:+(process.env.SP_TRIES||1)});
+  const MODE=process.env.SP_MODE||STIR_MODE; window.__stirMode(MODE);   // 4.28-exp: по умолчанию режим программы (swave) out.stirMode=STIR_MODE; H.set({ms:+(process.env.SP_TRIES||1)});
   const proj=(f)=>{ try{ __require(path.join(process.cwd(),'proj3d.js'))(verts, jacobiEig, f, 480); }catch(e){} };
   out.stirs=[]; let done=isCircle();
   for(let attempt=0; attempt<NSTIR && !done; attempt++){
