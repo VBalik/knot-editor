@@ -54,6 +54,7 @@
   else if(PRE>0){ H.play(); let st=0; while(true){ const o=H.step(200); st+=200; if(!o.running || st>=PRE) break; } if(H.running()) H.play(); out.preSteps=st; }
   if(process.env.SP_SAVE){ fs.mkdirSync(path.dirname(process.env.SP_SAVE),{recursive:true}); fs.writeFileSync(process.env.SP_SAVE, JSON.stringify({name:out.name, N, verts:verts.map(v=>[+v.x.toFixed(5),+v.y.toFixed(5),+v.z.toFixed(5)])})); out.saved=process.env.SP_SAVE; }
   if(process.env.HERN_CFG) out.hernCfg=window.__hernCfg(JSON.parse(process.env.HERN_CFG));
+  if(process.env.SW_CFG) out.swCfg=window.__swCfg(JSON.parse(process.env.SW_CFG));   // 4.25-exp: волны жёсткости (SP_MODE=swave)
   const MODE=process.env.SP_MODE||'hernia'; window.__stirMode(MODE); out.stirMode=STIR_MODE; H.set({ms:+(process.env.SP_TRIES||1)});
   const proj=(f)=>{ try{ __require(path.join(process.cwd(),'proj3d.js'))(verts, jacobiEig, f, 480); }catch(e){} };
   out.stirs=[]; let done=isCircle();
@@ -64,7 +65,7 @@
     const stirMs=Date.now()-ts;
     if(process.env.SP_PROJ) proj(process.env.SP_PROJ+'_stir'+attempt+'.png');
     const d=_dbgStir||{}; if(d.ok===undefined) d.ok=!d.tooTight; if(d.tooTight) d.why='too tight';
-    const rec={at:attempt, ok:d.ok, why:d.why, mode:d.mode, stirMs, det0:d.det0, det1:d.det1, det3d0, det3dS:_detRobust(3), crossS0:c0, crossS:crossPlane(), hern:d.hern||null, gmin_s:+(minSegGapRep()/sNominal()).toFixed(2), status:H.dbg().status.slice(0,80), N, running:H.running()};
+    const rec={at:attempt, ok:d.ok, why:d.why, mode:d.mode, stirMs, det0:d.det0, det1:d.det1, det3d0, det3dS:_detRobust(3), crossS0:c0, crossS:crossPlane(), hern:d.hern||null, sw:d.sw||null, gmin_s:+(minSegGapRep()/sNominal()).toFixed(2), status:H.dbg().status.slice(0,80), N, running:H.running()};
     if(process.env.UK_VERBOSE==='1') console.error(JSON.stringify(rec));
     if(!d.ok){ out.stirs.push(rec); if(process.env.SP_ONLY==='1') break; if(H.running()) H.play(); continue; }
     if(process.env.SP_ONLY==='1'){ out.stirs.push(rec); if(H.running()) H.play(); break; }
