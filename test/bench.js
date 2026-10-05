@@ -5,7 +5,7 @@
 // ЭТАЛОН ЗАВИСИТ ОТ ВЕРСИИ NODE: Math.pow/exp/sin и т. п. в разных V8 расходятся в последних битах, за 1500 шагов хэш траектории другой при той же физике
 // (проверено облачной сессией 2026-09-15: v3.7, v3.8, v3.9 и NOWASM=1 на Node 22 дают одну и ту же тройку). Эталоны — по главной версии Node, только для STEPS=1500.
 (async ()=>{ const REF_HASH={ // 26: эталон Air (Node v26.8.1) снят 4.17 — физика серии изменилась (волны отжига в Physics), пересчитать на Air: hashMatch null до этого
-                   22:{trefoil:1784076471, rand30:599538315, rand60:313950817} };   // облако Claude Code, Node v22.22.2, 4.18 (4.17: -1230814549, 2101400752, 1283745663; до 4.17: 348751188, 1089954128, -1041345001)
+                   22:{trefoil:1606125275, rand30:1134526189, rand60:-426057462} };   // облако Claude Code, Node v22.22.2, 4.29-exp — P_PLAIN: P без отжига и серии, по заданию пользователя (4.18: 1784076471, 599538315, 313950817; 4.17: -1230814549, 2101400752, 1283745663; до 4.17: 348751188, 1089954128, -1041345001)
   const H=global.__H; window.__noAutoSave=true; const out={}; if(process.env.NOWASM) window.__noWasm=true;
   out.wasm0=window.__wasm? window.__wasm() : null;
   const STEPS=+(process.env.STEPS||1500), FULL=+(process.env.FULL||0), KNOTS=(process.env.KNOTS||'trefoil,rand30,rand60').split(',');
