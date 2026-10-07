@@ -84,7 +84,9 @@ def('window', sandbox);
 def('__noAutoThick', true);           // стенд: тесты задают толщину явно (autoThick страницы отключён)
 if(process.env.NOWASM) def('__noWasm', true);   // NOWASM=1 — JS-путь ядра пар (3.2; результаты те же бит-в-бит)
 if(process.env.NOWASM==='2') def('WebAssembly', undefined);   // NOWASM=2 — как браузер без WebAssembly: обычные массивы вместо арены
-def('addEventListener', ()=>{});            // window.addEventListener (window===global)
+def('addEventListener', ()=>{});
+def('__noWallGate', true);
+def('__capL0', +(process.env.CAP_L0||0));   // стенд: кап смещения в долях ребра (0 — по умолчанию страницы)   // 4.38-exp: сторож по времени выключен в стенде (детерминизм по шагам)            // window.addEventListener (window===global)
 def('removeEventListener', ()=>{});
 def('document', documentMock);
 def('navigator', { userAgent:'node-harness' });

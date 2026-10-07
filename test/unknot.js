@@ -96,12 +96,12 @@
     for(let attempt=0; attempt<=NSTIR; attempt++){
       let st=0, o=null; const tP=Date.now();
       while(true){ o=H.step(200); st+=200;
-        if(VERB && st%(+(process.env.UK_TRACE||2000))===0){ const dd=_detRobust(3); console.error('   ', q, 'try', attempt, 'step', st, +((Date.now()-tP)/st).toFixed(1)+'ms/st', 'cross', crossings3D(), 'det3d', dd, 'quietBy', typeof _dbgQuietBy==='undefined'? '' : _dbgQuietBy);
+        if(VERB && st%(+(process.env.UK_TRACE||2000))===0){ const dd=_detRobust(3); console.error('   ', q, 'try', attempt, 'step', st, +((Date.now()-tP)/st).toFixed(1)+'ms/st', 'cross', crossings3D(), 'det3d', dd, 'quietBy', typeof _dbgQuietBy==='undefined'? '' : _dbgQuietBy, 'E', +normE().toFixed(4), 'mvR', (()=>{ const R=knotRadius(); let m=0; if(_trPrev && _trPrev.v.length===N){ for(let i=0;i<N;i++){ const d=verts[i].distanceTo(new THREE.Vector3(..._trPrev.v[i])); if(d>m) m=d; } } _trPrev={st, det:dd, v:verts.map(v=>[v.x,v.y,v.z])}; return +(m/R).toFixed(4); })(), 'N', N, 'frz', JSON.stringify(typeof _dbgFrz==='undefined'?null:_dbgFrz));
           if(process.env.UK_DUMPDET){ if(_trPrev && dd!==_trPrev.det){ const pre=process.env.UK_DUMPDET+'_k'+q+'_t'+attempt+'_s'+st; fs.writeFileSync(pre+'_before.json', JSON.stringify({step:_trPrev.st, det:_trPrev.det, N, L0, verts:_trPrev.v})); fs.writeFileSync(pre+'_after.json', JSON.stringify({step:st, det:dd, N, L0, verts:verts.map(v=>[v.x,v.y,v.z])})); console.error('   DET FLIP dumped', pre); }
             _trPrev={st, det:dd, v:verts.map(v=>[v.x,v.y,v.z])}; } }
         if(!o.running || st>=BUD) break; }
       const r=roundness(), cc=crossings3D(), d3=_detRobust(3);
-      rec.tries.push({at:attempt, steps:st, settled:!o.running, cross:cc, rad:r.rad, flat:r.flat, det3d:d3});
+      rec.tries.push({at:attempt, steps:st, settled:!o.running, cross:cc, rad:r.rad, flat:r.flat, det3d:d3, quietBy:(typeof _dbgQuietBy==="undefined"?"":_dbgQuietBy), note:(_runNote||"").slice(0,80), status:H.dbg().status.slice(0,140)});
       if(isCircle()){ done=true; break; }
       if(attempt===NSTIR) break;
       if(H.running()) H.play();
